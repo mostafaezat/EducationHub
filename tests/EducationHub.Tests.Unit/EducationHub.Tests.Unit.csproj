@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>EducationHub.Tests.Unit</RootNamespace>
+    <AssemblyName>EducationHub.Tests.Unit</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Moq" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EducationHub.Domain\EducationHub.Domain.csproj" />
+    <ProjectReference Include="..\..\src\EducationHub.Application\EducationHub.Application.csproj" />
+    <ProjectReference Include="..\..\src\EducationHub.Infrastructure\EducationHub.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\EducationHub.Shared\EducationHub.Shared.csproj" />
+    <ProjectReference Include="..\..\src\EducationHub.API\EducationHub.API.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

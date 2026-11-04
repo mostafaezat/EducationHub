@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>EducationHub.Shared</RootNamespace>
+    <AssemblyName>EducationHub.Shared</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Shared kernel. Holds cross-cutting primitives that Domain, Application,
+    Infrastructure and API all need (Result, PaginatedList, PermissionConstants).
+    Keeping them here avoids circular project references.
+    Intentionally has no PackageReference - pure types only.
+  -->
+
+</Project>

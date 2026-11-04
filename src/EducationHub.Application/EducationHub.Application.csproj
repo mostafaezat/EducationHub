@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>EducationHub.Application</RootNamespace>
+    <AssemblyName>EducationHub.Application</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Microsoft.EntityFrameworkCore is the one deliberate exception to the strict layering,
+    and it is here for a single reason: the shared pagination helper
+    (PaginationExtensions.ToPaginatedListAsync) needs IQueryable.CountAsync / ToListAsync,
+    which are EF extension methods. Handlers receive IQueryable<T> and would otherwise
+    have to re-implement paging - and, worse, would be tempted to use .Count()/.ToList(),
+    which executes synchronously and blocks a thread-pool thread.
+
+    The Application layer still contains no DbContext, no migration and no SQL: the
+    dependency is limited to IQueryable extension methods, and the concrete provider
+    (SqlServer in production, Sqlite in tests) is chosen in Infrastructure.
+  -->
+  <ItemGroup>
+    <PackageReference Include="MediatR" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.Extensions.Localization.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EducationHub.Domain\EducationHub.Domain.csproj" />
+    <ProjectReference Include="..\EducationHub.Shared\EducationHub.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EducationHub.Tests.Unit" />
+    <InternalsVisibleTo Include="EducationHub.Tests.Integration" />
+  </ItemGroup>
+
+</Project>

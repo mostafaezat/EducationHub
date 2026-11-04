@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>EducationHub.Domain</RootNamespace>
+    <AssemblyName>EducationHub.Domain</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    The Domain layer is the innermost ring and must not depend on EF Core, HTTP,
+    Infrastructure or any UI concern.
+
+    Microsoft.Extensions.Identity.Stores is the single permitted package reference: it
+    supplies the IdentityUser<TKey> / IdentityRole<TKey> POCO base classes only. It is a
+    small framework-agnostic package and is what lets ApplicationUser / ApplicationRole
+    reuse ASP.NET Core Identity instead of re-implementing password hashing, lockout and
+    email confirmation by hand.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Identity.Stores" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EducationHub.Shared\EducationHub.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

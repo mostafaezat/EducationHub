@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "EducationHub.API": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "EducationHub__Jwt__SigningKey": "EDUCATIONHUB_LOCAL_DEV_SIGNING_KEY_8f3a9c2b47d1e6059a1172f82c6d4eb0"
+      },
+      "applicationUrl": "https://localhost:57734;http://localhost:57735"
+    }
+  }
+}

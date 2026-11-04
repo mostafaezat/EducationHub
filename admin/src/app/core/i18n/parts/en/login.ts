@@ -1,0 +1,41 @@
+export const EN_LOGIN: Record<string, string> = {
+  'login.subtitle': 'Administration console',
+  'login.form.passwordLabel': 'Password',
+  'login.form.rememberMe': 'Remember me',
+  'login.signIn': 'Sign in',
+  'login.welcomeBack': 'Welcome back, {name}.',
+  'login.signInFailed': 'Sign in failed. Check your email and password.',
+  'login.forgotPassword': 'Forgot password?',
+  'login.emailNotConfirmedHint': "This account's email address has not been confirmed yet.",
+
+  'forgot.title': 'Reset your password',
+  'forgot.subtitle': 'Enter your account email and we will send you a reset link.',
+  'forgot.submit': 'Send reset link',
+  'forgot.sent':
+    'If an account exists for {email}, a reset link is on its way. Check your inbox - in development, the link appears in the API log.',
+  'forgot.backToLogin': 'Back to sign in',
+  'forgot.failed': 'Could not start the password reset. Please try again.',
+
+  'reset.title': 'Choose a new password',
+  'reset.subtitle': 'The reset link was opened for {email}.',
+  'reset.newPassword': 'New password',
+  'reset.confirmPassword': 'Confirm new password',
+  'reset.passwordHint': 'At least 8 characters, including a digit.',
+  'reset.submit': 'Reset password',
+  'reset.mismatch': 'The password and confirmation do not match.',
+  'reset.needDigit': 'The password must contain a digit.',
+  'reset.success': 'Your password has been reset. Sign in with the new password.',
+  'reset.invalidLink': 'This reset link is missing or invalid. Request a new one.',
+  'reset.requestNew': 'Request a new link',
+  'reset.failed': 'Could not reset the password. The link may have expired - request a new one.',
+
+  'confirm.title': 'Email confirmation',
+  'confirm.confirming': 'Confirming your email address…',
+  'confirm.success': 'Your email has been confirmed. You can sign in now.',
+  'confirm.failed':
+    'We could not confirm that email address. The link may have expired or have already been used.',
+  'confirm.resend': 'Resend confirmation email',
+  'confirm.resendSent':
+    'If an unconfirmed account exists for {email}, a new confirmation email has been sent. In development, the link appears in the API log.',
+  'confirm.backToLogin': 'Back to sign in'
+};
