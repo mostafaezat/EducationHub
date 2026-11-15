@@ -16,10 +16,12 @@ namespace EducationHub.API.Seed;
 public sealed class DatabaseSeeder(
     RoleSeeder roles,
     AdminUserSeeder admin,
+    DemoTenantSeeder demoTenant,
     AcademicSeeder academic,
     DemoTeacherSeeder teachers,
     DemoStudentParentSeeder students,
     DemoStudentProfileSeeder studentProfiles,
+    DemoOperationsSeeder operations,
     DevelopmentDataSeeder development,
     ILogger<DatabaseSeeder> logger)
 {
@@ -29,6 +31,10 @@ public sealed class DatabaseSeeder(
 
         var adminSeeded = await admin.SeedAsync(cancellationToken).ConfigureAwait(false);
 
+        // Creates the demo tenant on a fresh dev database (opt-in), so the demo seeders below have
+        // a tenant to fill on the very first run.
+        await demoTenant.SeedAsync(cancellationToken).ConfigureAwait(false);
+
         await academic.SeedAsync(cancellationToken).ConfigureAwait(false);
 
         await teachers.SeedAsync(cancellationToken).ConfigureAwait(false);
@@ -36,6 +42,8 @@ public sealed class DatabaseSeeder(
         await students.SeedAsync(cancellationToken).ConfigureAwait(false);
 
         await studentProfiles.SeedAsync(cancellationToken).ConfigureAwait(false);
+
+        await operations.SeedAsync(cancellationToken).ConfigureAwait(false);
 
         await development.SeedAsync(cancellationToken).ConfigureAwait(false);
 

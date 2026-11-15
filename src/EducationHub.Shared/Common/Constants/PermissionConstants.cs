@@ -297,6 +297,19 @@ public static class PermissionConstants
     public static IReadOnlyList<string> GetAll()
         => [.. Areas.Values.SelectMany(static v => v)];
 
+    /// <summary>
+    /// Areas the platform administrator works in: tenants, platform users and roles, the
+    /// permission catalog, its own dashboard and the audit trail. Everything else (people,
+    /// academics, scheduling, money, learning, files, branches, tenant settings) is a tenant's
+    /// own business data, handled by that tenant's staff and never by the platform role.
+    /// </summary>
+    public static IReadOnlyList<string> PlatformAreaNames { get; } =
+        ["Auth", "Platform", "Users", "Roles", "Permissions", "Tenants", "Dashboard", "AuditLogs"];
+
+    /// <summary>The exact permission set of the <c>PlatformAdmin</c> role.</summary>
+    public static IReadOnlyList<string> GetPlatformPermissions()
+        => [.. PlatformAreaNames.SelectMany(area => Areas[area])];
+
     /// <summary>Label shown for a permission code, e.g. <c>Students.Create</c> -> <c>Create</c>.</summary>
     public static string DescribeAction(string permission)
     {

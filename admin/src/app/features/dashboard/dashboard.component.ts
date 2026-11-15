@@ -360,7 +360,10 @@ export class DashboardComponent {
 
   private loadKpis(): void {
     // Platform administrators have no tenant, so there is nothing operational to count.
-    if (!this.auth.hasPermission('Dashboard.View') || this.auth.hasPermission('Platform.ManageTenants')) {
+    const tenantId = this.auth.user()?.tenantId;
+    const isPlatform = !tenantId || tenantId === '00000000-0000-0000-0000-000000000000';
+
+    if (!this.auth.hasPermission('Dashboard.View') || isPlatform) {
       return;
     }
 

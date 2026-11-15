@@ -139,10 +139,12 @@ builder.Services
 // are registered so it (and the tests) can compose or invoke them individually.
 builder.Services.AddScoped<EducationHub.API.Seed.RoleSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.AdminUserSeeder>();
+builder.Services.AddScoped<EducationHub.API.Seed.DemoTenantSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.AcademicSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoTeacherSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoStudentParentSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoStudentProfileSeeder>();
+builder.Services.AddScoped<EducationHub.API.Seed.DemoOperationsSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DevelopmentDataSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DatabaseSeeder>();
 

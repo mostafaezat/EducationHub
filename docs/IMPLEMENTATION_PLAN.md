@@ -277,6 +277,16 @@ or test-run** — the phase closes only after the local verification gate below.
 - [x] Accountant role also gets `Grades.View` + `Teachers.View`; `RoleSeeder` repaired all 10 existing
       dev tenants on startup ("Seed complete: 1 platform role, 10 tenant(s) processed").
 
+### Mission Phase 8b — Platform scope + demo data (2026-11-04, user request)
+- [x] `PlatformAdmin` narrowed to platform areas (`PermissionConstants.GetPlatformPermissions()`);
+      tenant business endpoints answer 403 to it and the screens disappear from its menu
+      (user report: platform admin saw tenant screens that then errored). Unit `PlatformPermissionTests`,
+      integration `Platform_admin_manages_tenants_but_cannot_open_tenant_business_data`.
+- [x] `DemoOperationsSeeder` fills `admin-ui-test` with groups, sessions, attendance, fees, payments,
+      cash, expenses, settlements, homework, exams and notifications (`docs/SEED_DATA_AND_LOCAL_LOGIN.md` §4.6);
+      `DemoOperationsSeedingTests` (2).
+- [ ] Integration run on the dev machine for the new tests (pending).
+
 ### Mission Phase 9 — Docs + final report ✅ (2026-11-04)
 - [x] This file, `docs/FEATURE_STATUS.md`, `LOCAL_RUN_AND_TEST_STATUS.md` (§ "2026-11-03 verification").
 

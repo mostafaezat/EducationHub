@@ -88,10 +88,12 @@ public sealed class RoleSeeder(
             logger.LogInformation("Created platform role {RoleName}", RoleNames.PlatformAdmin);
         }
 
-        // Every permission, including the platform ones a tenant role must never hold.
-        // Same exact-reconcile routine tenant provisioning uses for the seven tenant roles.
+        // The platform areas only (tenants, platform users/roles, audit...). Tenant business
+        // data - students, groups, money, homework - is never part of the platform role, so a
+        // platform administrator cannot open those screens or call those endpoints. The exact
+        // reconcile also removes any tenant permission an earlier version had granted.
         var reconciled = await roleProvisioner
-            .ReconcilePermissionsAsync(existing, PermissionConstants.GetAll(), cancellationToken)
+            .ReconcilePermissionsAsync(existing, PermissionConstants.GetPlatformPermissions(), cancellationToken)
             .ConfigureAwait(false);
 
         if (!reconciled.Succeeded)

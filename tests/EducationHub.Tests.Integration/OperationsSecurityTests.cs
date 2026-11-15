@@ -73,6 +73,33 @@ public sealed class OperationsSecurityTests(ApiTestFixture fixture)
     }
 
     [Fact]
+    public async Task Platform_admin_manages_tenants_but_cannot_open_tenant_business_data()
+    {
+        var platform = await ApiScenarios.PlatformAdminTokenAsync(Client);
+
+        using (var tenants = await Client.GetAsync("/api/tenants", platform))
+        {
+            Assert.Equal(HttpStatusCode.OK, tenants.StatusCode);
+        }
+
+        using (var users = await Client.GetAsync("/api/users", platform))
+        {
+            Assert.Equal(HttpStatusCode.OK, users.StatusCode);
+        }
+
+        foreach (var path in ProtectedReads.Concat(["/api/students", "/api/parents", "/api/teachers", "/api/grades", "/api/subjects", "/api/academic-years", "/api/branches"]))
+        {
+            using var response = await Client.GetAsync(path, platform);
+            Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"Platform admin GET {path} returned {(int)response.StatusCode}.");
+        }
+
+        var me = (await (await Client.GetAsync("/api/auth/me", platform)).ReadJsonAsync()).GetProperty("data");
+        var permissions = me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToList();
+        Assert.DoesNotContain(permissions, p => p!.StartsWith("Students.", StringComparison.Ordinal) || p.StartsWith("Fees.", StringComparison.Ordinal));
+        Assert.Contains(PermissionConstants.PlatformManageTenants, permissions);
+    }
+
+    [Fact]
     public async Task Accountant_can_run_fees_and_settlements_but_not_manage_people_or_teaching()
     {
         var (_, token) = await ModuleTestHelpers.ProvisionAndLoginAsync(Client, "sec-acc");

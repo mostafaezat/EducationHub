@@ -406,12 +406,16 @@ export class UsersComponent implements OnInit {
       roles: this.canCreate() || this.canUpdate()
         ? this.rolesService.list({ pageNumber: 1, pageSize: 100 })
         : of(null),
-      branches: this.branchesService.list({ pageNumber: 1, pageSize: 100 })
+      // Branches are tenant data: a platform administrator has no Branches.View and no
+      // branch picker, so the request is skipped instead of failing with 403.
+      branches: this.auth.hasPermission('Branches.View')
+        ? this.branchesService.list({ pageNumber: 1, pageSize: 100 })
+        : of(null)
     }).subscribe(({ roles, branches }) => {
       if (roles) {
         this.roleOptions.set(roles.items.map((role) => ({ label: role.name, value: role.name })));
       }
-      this.branchOptions.set(branches.items.map((branch) => ({ label: branch.name, value: branch.id })));
+      this.branchOptions.set(branches ? branches.items.map((branch) => ({ label: branch.name, value: branch.id })) : []);
     });
   }
 

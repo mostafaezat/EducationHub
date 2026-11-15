@@ -60,6 +60,26 @@ Behavioural guarantees:
 
 ## 4. Demo data (`DevelopmentDataSeeder`, `AcademicSeeder`, `DemoTeacherSeeder`, `DemoStudentParentSeeder`)
 
+### 4.0 Fresh database in one run (2026-11-04)
+
+Point `ConnectionStrings:DefaultConnection` at a database name that does not exist and start the
+API with the `EducationHub.API` launch profile (`.\start-dev.ps1` does): the first startup creates
+the database, applies every migration, then seeds in order the platform admin, the
+`admin-ui-test` tenant + its admin (`DemoTenantSeeder`, through `CreateTenantCommand`), the
+academic catalog, the demo teacher/student/parent accounts, their profiles (teachers included)
+and the demo operational data (§4.6). The launch profile carries the development-only values:
+
+| Variable | Value in `launchSettings.json` |
+|---|---|
+| `EDUCATIONHUB_ADMIN_EMAIL` / `_PASSWORD` | `platform.admin@educationhub.local` / `Admin1234` |
+| `EDUCATIONHUB_DEMO_TENANT_ADMIN_EMAIL` / `_PASSWORD` | `tenant.admin@educationhub.local` / `Admin1234` |
+| `EDUCATIONHUB_DEMO_TEACHER_PASSWORD` | `Demo#Teacher123` |
+| `EDUCATIONHUB_DEMO_STUDENT_PASSWORD` / `_PARENT_PASSWORD` | `Demo#Family123` |
+
+These are local-development credentials only (the launch profile is never used in production,
+where the variables are unset and every demo seeder is a logged no-op). Existing accounts are
+never reset. Covered by `DemoTenantSeedingTests`.
+
 ### 4.1 Academic catalog (`AcademicSeeder`)
 
 Runs after `RoleSeeder`/`AdminUserSeeder` and targets **exactly one tenant**, found by slug
@@ -158,7 +178,30 @@ Workflow: set the variable(s) → start the API once → unset them. The groups 
 be seeded alone. Existing accounts' passwords are never reset or rotated regardless of
 what the variables hold.
 
-### 4.6 Nothing else (`DevelopmentDataSeeder`)
+### 4.6 Demo operational data (`DemoOperationsSeeder`, 2026-11-04)
+
+Runs after `DemoStudentProfileSeeder` against the same `admin-ui-test` tenant and fills the
+Mission Phase 3-6 screens so every feature can be tried at once:
+
+| Area | What is created |
+|---|---|
+| People | 12 student profiles (`DEMO-S01`…`DEMO-S12`, no sign-in accounts), 6 parent profiles (`demo.parentNN@educationhub.local`, no accounts) linked two children each |
+| Groups | 3 groups (codes `DEMO-G1`…`DEMO-G3`) on the tenant's first three active subjects, the tenant's existing teachers round-robin, weekly slots, 4–5 students each; demo student accounts (if seeded) join group A |
+| Sessions | Every slot occurrence from 28 days ago to 14 days ahead; past ones `Completed` with attendance (a few absent/late/excused), one in eleven `Cancelled`, future ones `Scheduled` |
+| Fees | Monthly default rule (400) + a group-A rule (500) when the tenant has no monthly rule; charges for last and this month; payments in four patterns (unpaid / last month / both / last month + half), FIFO-allocated |
+| Cash | "Main cash box" (default, opening 5,000) and "Bank account" (opening 20,000) when the tenant has none; one manual deposit; one posting per payment, expense and teacher payment |
+| Expenses | Categories Rent / Utilities / Supplies / Maintenance; five expenses over the two months |
+| Teachers | A 150-per-session rule (only if the tenant has no compensation rule), compensation for every completed session with a teacher, and one settlement of the first teacher's sessions before this month |
+| Learning | Per group: a graded worksheet (past due, one missing, one ungraded) and an open one; a past quiz with results (one absent) and an upcoming midterm |
+| Notifications | Three per demo student/parent account in group A (one already read) |
+
+Run-once and add-only: if any group whose code starts with `DEMO-` exists (even soft-deleted) the
+seeder writes nothing; it never deletes or edits existing rows and never creates accounts or
+passwords. It needs at least one active subject in the tenant, otherwise it logs a warning and
+skips. To re-seed from scratch on a dev database, delete the demo groups (and their data) first.
+Covered by `DemoOperationsSeedingTests`.
+
+### 4.7 Nothing else (`DevelopmentDataSeeder`)
 
 The seeder intentionally manufactures no further demo records. The documented demo data — the
 `admin-ui-test` tenant and `tenant.admin@educationhub.local` — is created **through the
@@ -221,6 +264,13 @@ table, including the tenant administrator):
 - 5 consecutive failures lock the account for 15 minutes.
 - Credential endpoints are rate-limited per IP (`auth-credential`): bursts answer `429`
   with `Retry-After: 60`.
+
+**Platform administrator scope (2026-11-04).** The `PlatformAdmin` role holds only the platform
+areas (`PermissionConstants.PlatformAreaNames`: Auth, Platform, Users, Roles, Permissions, Tenants,
+Dashboard, AuditLogs). It manages tenants, platform users and roles and reads the audit trail; it
+does **not** see a tenant's students, groups, money or learning data — sign in as that tenant's
+admin (`tenant.admin@educationhub.local` for `admin-ui-test`) for those. `RoleSeeder` reconciles
+the role on startup, so sign out and back in after upgrading.
 
 **Password policy** (Identity options, `Infrastructure/DependencyInjection.cs`): minimum
 8 characters, at least one digit and one lowercase letter; uppercase and non-alphanumeric
