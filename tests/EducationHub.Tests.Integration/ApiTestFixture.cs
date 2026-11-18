@@ -48,6 +48,9 @@ public sealed class ApiTestFixture : IAsyncLifetime
 
     public HttpClient Client { get; private set; } = null!;
 
+    /// <summary>Every WhatsApp message the shared host "sent".</summary>
+    public CapturingWhatsAppSender WhatsApp => _factory.WhatsApp;
+
     public async Task InitializeAsync()
     {
         await CreateDatabaseAsync().ConfigureAwait(false);
@@ -63,6 +66,8 @@ public sealed class ApiTestFixture : IAsyncLifetime
         SetEnvironment("EDUCATIONHUB_ADMIN_EMAIL", AdminEmail);
         SetEnvironment("EDUCATIONHUB_ADMIN_PASSWORD", AdminPassword);
         SetEnvironment("Auth__RateLimit__PermitLimit", "10000");
+        SetEnvironment("Auth__RateLimit__PhoneReset__PermitLimit", "10000");
+        SetEnvironment("Auth__RateLimit__PublicRegistration__PermitLimit", "10000");
         SetEnvironment("Auth__Email__FrontendBaseUrl", "https://portal.test");
 
         _factory = new ApiWebApplicationFactory();

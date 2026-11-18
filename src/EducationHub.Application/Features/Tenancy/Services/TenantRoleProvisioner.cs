@@ -37,6 +37,84 @@ public sealed class TenantRoleProvisioner(
     ILogger<TenantRoleProvisioner> logger)
 {
     /// <summary>
+    /// Role-claim type marking which version of the built-in permission sets a system role was
+    /// last reconciled to. Not a permission: every permission reader filters on
+    /// <see cref="EducationHubClaimTypes.PermissionClaimType"/>, so this claim never reaches a token.
+    /// </summary>
+    public const string DefaultsVersionClaimType = "SystemPermissionsVersion";
+
+    /// <summary>
+    /// The first stamped version of the built-in permission sets. Roles stamped with it hold
+    /// (or held, before a tenant customised them) the defaults as they were then; everything
+    /// granted later is listed in <see cref="AddedInVersion"/>.
+    /// </summary>
+    public const string BaselineVersion = "2026-11-18";
+
+    /// <summary>
+    /// Version of <see cref="BuildDefaultRolePermissions"/>: always the last entry of
+    /// <see cref="AddedInVersion"/>. To grant a built-in role a new permission, add it to the
+    /// role in <see cref="BuildDefaultRolePermissions"/> (for new tenants), append a new
+    /// version entry listing it (for existing tenants) and set this constant to that version.
+    /// </summary>
+    public const string DefaultsVersion = "2026-11-18.2";
+
+    /// <summary>
+    /// What each version added to which built-in role, oldest first. Existing roles are upgraded
+    /// additively: only the entries newer than a role's stamp are applied, and only by adding.
+    /// Nothing is ever removed, and a permission granted by an older version that a tenant has
+    /// since removed is never granted again.
+    /// </summary>
+    internal static readonly IReadOnlyList<(string Version, IReadOnlyDictionary<string, IReadOnlyList<string>> Added)> AddedInVersion =
+    [
+        ("2026-11-18.2", new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [RoleNames.TenantOwner] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage],
+            [RoleNames.TenantAdmin] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage],
+            [RoleNames.Assistant] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage]
+        })
+    ];
+
+    /// <summary>The full default permission set of a built-in role (empty for an unknown name).</summary>
+    public static IReadOnlyList<string> DefaultPermissionsFor(string roleName)
+        => DefaultRolePermissions.TryGetValue(roleName, out var permissions) ? permissions : [];
+
+    /// <summary>
+    /// The permissions to add to a role stamped <paramref name="stampedVersion"/>, or null when
+    /// the stamp is not a version this build knows (it was written by a newer build), in which
+    /// case the role must be left alone.
+    /// </summary>
+    public static IReadOnlyList<string>? PermissionsAddedSince(string roleName, string stampedVersion)
+    {
+        var start = -1;
+
+        if (string.Equals(stampedVersion, BaselineVersion, StringComparison.Ordinal))
+        {
+            start = 0;
+        }
+
+        for (var i = 0; start < 0 && i < AddedInVersion.Count; i++)
+        {
+            if (string.Equals(AddedInVersion[i].Version, stampedVersion, StringComparison.Ordinal))
+            {
+                start = i + 1;
+            }
+        }
+
+        if (start < 0)
+        {
+            return null;
+        }
+
+        return
+        [
+            .. AddedInVersion
+                .Skip(start)
+                .SelectMany(entry => entry.Added.TryGetValue(roleName, out var added) ? added : [])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
+    }
+
+    /// <summary>
     /// What each built-in role may do.
     /// </summary>
     /// <remarks>
@@ -48,16 +126,26 @@ public sealed class TenantRoleProvisioner(
         static IReadOnlyList<string> Group(string area, params string[] actions)
             => [.. actions.Select(a => $"{area}.{a}")];
 
+        IReadOnlyList<string> familyRead =
+        [
+            PermissionConstants.GroupsView,
+            PermissionConstants.SessionsView,
+            PermissionConstants.AttendanceView,
+            PermissionConstants.HomeworkView,
+            PermissionConstants.ExamsView
+        ];
+
         return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
-            [RoleNames.TenantOwner] = [.. PermissionConstants.GetAll()],
+            // Everything inside the tenant; never the platform-only areas (tenants, plans,
+            // platform settings), which belong to the platform administrator alone.
+            [RoleNames.TenantOwner] = [.. PermissionConstants.GetTenantPermissions()],
 
             [RoleNames.TenantAdmin] =
             [
                 .. Group("Users", "View", "Create", "Update", "Delete", "AssignRoles", "ResetPassword", "ToggleActive"),
                 .. Group("Roles", "View", "Create", "Update", "Delete", "AssignPermissions"),
                 .. Group("Permissions", "View"),
-                .. Group("Tenants", "View"),
                 .. Group("Branches", "View", "Create", "Update", "Delete"),
                 .. Group("Settings", "View", "Update"),
                 .. Group("AcademicYears", "View", "Create", "Update", "Delete"),
@@ -76,17 +164,18 @@ public sealed class TenantRoleProvisioner(
                 .. Group("Reports", "View"),
                 .. Group("Homework", "View", "Manage"),
                 .. Group("Exams", "View", "Manage"),
+                .. Group("RegistrationRequests", "View", "Manage"),
                 .. Group("AuditLogs", "View"),
                 PermissionConstants.DashboardView,
                 PermissionConstants.Login,
                 PermissionConstants.ChangePassword
             ],
 
+            // Teachers see their own groups only (row-level DataScope); the user directory and
+            // the centre's settings are management data, so they are not part of the role.
             [RoleNames.Teacher] =
             [
-                .. Group("Users", "View"),
                 .. Group("Branches", "View"),
-                .. Group("Settings", "View"),
                 .. Group("AcademicYears", "View"),
                 .. Group("Grades", "View"),
                 .. Group("Subjects", "View"),
@@ -105,9 +194,7 @@ public sealed class TenantRoleProvisioner(
 
             [RoleNames.Assistant] =
             [
-                .. Group("Users", "View"),
                 .. Group("Branches", "View"),
-                .. Group("Settings", "View"),
                 .. Group("AcademicYears", "View"),
                 .. Group("Grades", "View"),
                 .. Group("Subjects", "View"),
@@ -119,6 +206,7 @@ public sealed class TenantRoleProvisioner(
                 .. Group("Attendance", "View", "Mark"),
                 .. Group("Homework", "View"),
                 .. Group("Exams", "View"),
+                .. Group("RegistrationRequests", "View", "Manage"),
                 PermissionConstants.DashboardView,
                 PermissionConstants.Login,
                 PermissionConstants.ChangePassword
@@ -145,9 +233,13 @@ public sealed class TenantRoleProvisioner(
                 PermissionConstants.ChangePassword
             ],
 
+            // Parents and students read their own family's teaching data. The rows they get are
+            // narrowed by DataScope to their own children / themself, and the role holds no
+            // write permission at all.
             [RoleNames.Parent] =
             [
                 .. Group("Subjects", "View"),
+                .. familyRead,
                 PermissionConstants.ParentsViewOwnChildren,
                 PermissionConstants.DashboardView,
                 PermissionConstants.Login,
@@ -157,6 +249,7 @@ public sealed class TenantRoleProvisioner(
             [RoleNames.Student] =
             [
                 .. Group("Subjects", "View"),
+                .. familyRead,
                 PermissionConstants.DashboardView,
                 PermissionConstants.Login,
                 PermissionConstants.ChangePassword
@@ -245,15 +338,171 @@ public sealed class TenantRoleProvisioner(
                 tenant.Id);
         }
 
-        var desired = DefaultRolePermissions.TryGetValue(roleName, out var permissions)
-            ? permissions
-            : [];
+        return await ApplyDefaultsAsync(role, roleName, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The startup repair path: creates a missing system role (with the full defaults), and
+    /// upgrades an existing one additively when its stamp is older than <see cref="DefaultsVersion"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A tenant may adjust its own system roles (remove a permission, add an extra one). The
+    /// upgrade therefore never removes anything and only grants what the versions newer than the
+    /// role's stamp added (<see cref="AddedInVersion"/>), so a permission the tenant deliberately
+    /// removed is not granted back. A role already at the current version is not touched.
+    /// </para>
+    /// <para>
+    /// A role with no stamp at all predates versioning, when every startup reset roles to the
+    /// defaults, so it cannot hold a deliberate removal: it gets whatever defaults it is missing.
+    /// A stamp this build does not recognise came from a newer build and is left alone.
+    /// </para>
+    /// </remarks>
+    public async Task<RoleProvisionResult> EnsureRoleKeepingCustomizationsAsync(
+        string roleName,
+        Tenant tenant,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(roleName);
+        ArgumentNullException.ThrowIfNull(tenant);
+
+        var role = await FindRoleAsync(roleName, tenant.Id, cancellationToken).ConfigureAwait(false);
+
+        if (role is null)
+        {
+            return await EnsureRoleAsync(roleName, tenant, cancellationToken).ConfigureAwait(false);
+        }
+
+        var claims = await roleManager.GetClaimsAsync(role).ConfigureAwait(false);
+
+        var stamp = claims.FirstOrDefault(static c => c.Type == DefaultsVersionClaimType)?.Value;
+
+        if (string.Equals(stamp, DefaultsVersion, StringComparison.Ordinal))
+        {
+            return new RoleProvisionResult(true, []);
+        }
+
+        IReadOnlyList<string> toAdd;
+
+        if (stamp is null)
+        {
+            toAdd = DefaultPermissionsFor(roleName);
+        }
+        else
+        {
+            var added = PermissionsAddedSince(roleName, stamp);
+
+            if (added is null)
+            {
+                logger.LogWarning(
+                    "Role {RoleName} of tenant {TenantId} is stamped with unknown defaults version {Version}; left unchanged",
+                    roleName,
+                    tenant.Id,
+                    stamp);
+
+                return new RoleProvisionResult(true, []);
+            }
+
+            toAdd = added;
+        }
+
+        var granted = await AddMissingPermissionsAsync(role, claims, toAdd, cancellationToken).ConfigureAwait(false);
+
+        if (!granted.Succeeded)
+        {
+            return granted;
+        }
+
+        if (toAdd.Count > 0)
+        {
+            logger.LogInformation(
+                "Upgraded role {RoleName} of tenant {TenantId} from defaults version {From} to {To}",
+                roleName,
+                tenant.Id,
+                stamp ?? "(none)",
+                DefaultsVersion);
+        }
+
+        var stamped = await StampVersionAsync(role).ConfigureAwait(false);
+
+        return stamped.Succeeded
+            ? new RoleProvisionResult(true, [])
+            : new RoleProvisionResult(false, [.. stamped.Errors.Select(static e => e.Description)]);
+    }
+
+    /// <summary>Grants each of <paramref name="permissions"/> the role does not hold yet; never removes.</summary>
+    private async Task<RoleProvisionResult> AddMissingPermissionsAsync(
+        ApplicationRole role,
+        IList<Claim> existingClaims,
+        IReadOnlyList<string> permissions,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var present = existingClaims
+            .Where(static c => c.Type == EducationHubClaimTypes.PermissionClaimType)
+            .Select(static c => c.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var errors = new List<string>();
+
+        foreach (var permission in permissions.Where(p => !present.Contains(p)))
+        {
+            var addition = await roleManager
+                .AddClaimAsync(role, new Claim(EducationHubClaimTypes.PermissionClaimType, permission))
+                .ConfigureAwait(false);
+
+            if (!addition.Succeeded)
+            {
+                errors.AddRange(addition.Errors.Select(static e => e.Description));
+            }
+        }
+
+        return new RoleProvisionResult(errors.Count == 0, errors);
+    }
+
+    /// <summary>Reconciles the role to its default permission set and stamps the current version.</summary>
+    private async Task<RoleProvisionResult> ApplyDefaultsAsync(
+        ApplicationRole role,
+        string roleName,
+        CancellationToken cancellationToken)
+    {
+        var desired = DefaultPermissionsFor(roleName);
 
         var reconcile = await ReconcilePermissionsAsync(role, desired, cancellationToken).ConfigureAwait(false);
 
-        return reconcile.Succeeded
+        if (!reconcile.Succeeded)
+        {
+            return new RoleProvisionResult(false, reconcile.Errors);
+        }
+
+        var stamped = await StampVersionAsync(role).ConfigureAwait(false);
+
+        return stamped.Succeeded
             ? new RoleProvisionResult(true, [])
-            : new RoleProvisionResult(false, reconcile.Errors);
+            : new RoleProvisionResult(false, [.. stamped.Errors.Select(static e => e.Description)]);
+    }
+
+    private async Task<IdentityResult> StampVersionAsync(ApplicationRole role)
+    {
+        var claims = await roleManager.GetClaimsAsync(role).ConfigureAwait(false);
+
+        foreach (var old in claims.Where(static c => c.Type == DefaultsVersionClaimType && c.Value != DefaultsVersion))
+        {
+            var removed = await roleManager.RemoveClaimAsync(role, old).ConfigureAwait(false);
+
+            if (!removed.Succeeded)
+            {
+                return removed;
+            }
+        }
+
+        if (claims.Any(static c => c.Type == DefaultsVersionClaimType && c.Value == DefaultsVersion))
+        {
+            return IdentityResult.Success;
+        }
+
+        return await roleManager.AddClaimAsync(role, new Claim(DefaultsVersionClaimType, DefaultsVersion)).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Extensions;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Teachers.DTOs;
@@ -158,7 +159,8 @@ public sealed record GetTeacherCompensationQuery(Guid TeacherId, Guid? SubjectId
 
 public sealed class GetTeacherCompensationQueryHandler(
     IRepository<TeacherProfile> profiles,
-    CompensationResolver resolver)
+    CompensationResolver resolver,
+    DataScopeService dataScope)
     : IRequestHandler<GetTeacherCompensationQuery, Result<ResolvedCompensationDto>>
 {
     public async Task<Result<ResolvedCompensationDto>> Handle(
@@ -167,7 +169,11 @@ public sealed class GetTeacherCompensationQueryHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var profile = await profiles.GetByIdAsync(request.TeacherId, cancellationToken).ConfigureAwait(false);
+        // Pay is private: a teacher reads their own compensation, never a colleague's.
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+        var profile = scope.IsUnrestricted || scope.TeacherProfileIds.Contains(request.TeacherId)
+            ? await profiles.GetByIdAsync(request.TeacherId, cancellationToken).ConfigureAwait(false)
+            : null;
 
         if (profile is null)
         {
@@ -186,7 +192,7 @@ public sealed class GetTeacherCompensationQueryHandler(
 public sealed record GetCompensationRulesQuery(PaginationRequest Pagination, Guid? TeacherProfileId)
     : IRequest<Result<PaginatedList<CompensationRuleDto>>>;
 
-public sealed class GetCompensationRulesQueryHandler(IRepository<CompensationRule> rules)
+public sealed class GetCompensationRulesQueryHandler(IRepository<CompensationRule> rules, DataScopeService dataScope)
     : IRequestHandler<GetCompensationRulesQuery, Result<PaginatedList<CompensationRuleDto>>>
 {
     public async Task<Result<PaginatedList<CompensationRuleDto>>> Handle(
@@ -195,7 +201,15 @@ public sealed class GetCompensationRulesQueryHandler(IRepository<CompensationRul
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = rules.Query.AsQueryable();
+
+        // A teacher sees the rules that apply to them: their own and the centre-wide defaults.
+        if (!scope.IsUnrestricted)
+        {
+            var own = scope.TeacherProfileIds.ToArray();
+            query = query.Where(r => r.TeacherProfileId == null || own.Contains(r.TeacherProfileId.Value));
+        }
 
         if (request.TeacherProfileId.HasValue)
         {

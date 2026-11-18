@@ -82,6 +82,8 @@ public static class LocalizationKeys
     public const string EmailRequired = "Validation.EmailRequired";
     public const string EmailMaxLength = "Validation.EmailMaxLength";
     public const string EmailInvalid = "Validation.EmailInvalid";
+
+    public const string LoginIdentifierInvalid = "Validation.LoginIdentifierInvalid";
     public const string EmailValidRequired = "Validation.EmailValidRequired";
     public const string PasswordRequired = "Validation.PasswordRequired";
     public const string PasswordMaxLength = "Validation.PasswordMaxLength";
@@ -167,6 +169,30 @@ public static class LocalizationKeys
     public const string GuardianListRequired = "Validation.GuardianListRequired";
     public const string GuardianDuplicate = "Validation.GuardianDuplicate";
     public const string GuardianPrimaryMultiple = "Validation.GuardianPrimaryMultiple";
+
+    public const string PhoneRequired = "Validation.PhoneRequired";
+    public const string PhoneInvalid = "Validation.PhoneInvalid";
+    public const string ResetCodeRequired = "Validation.ResetCodeRequired";
+    public const string ResetCodeFormat = "Validation.ResetCodeFormat";
+    public const string AuthPhoneResetCodeSent = "Auth.PhoneResetCodeSent";
+    public const string AuthInvalidResetCode = "Auth.InvalidResetCode";
+    public const string AuthPasswordResetDone = "Auth.PasswordResetDone";
+
+    public const string RegistrationGuardianNameRequired = "Validation.RegistrationGuardianNameRequired";
+    public const string RegistrationStudentNameRequired = "Validation.RegistrationStudentNameRequired";
+    public const string RegistrationNameTooLong = "Validation.RegistrationNameTooLong";
+    public const string RegistrationRelationshipInvalid = "Validation.RegistrationRelationshipInvalid";
+    public const string RegistrationBirthDateInvalid = "Validation.RegistrationBirthDateInvalid";
+    public const string RegistrationTooManySubjects = "Validation.RegistrationTooManySubjects";
+    public const string RegistrationNotesTooLong = "Validation.RegistrationNotesTooLong";
+    public const string RegistrationRejectReasonRequired = "Validation.RegistrationRejectReasonRequired";
+    public const string RegistrationRejectReasonTooLong = "Validation.RegistrationRejectReasonTooLong";
+    public const string RegistrationReceived = "RegistrationRequests.Received";
+    public const string RegistrationDuplicate = "RegistrationRequests.AlreadyExists";
+    public const string RegistrationAlreadyReviewed = "RegistrationRequests.ReviewConflict";
+    public const string RegistrationNotificationTitle = "RegistrationRequests.NotificationTitle";
+    public const string RegistrationNotFound = "RegistrationRequests.NotFound";
+    public const string PublicRegistrationNotFound = "PublicRegistration.NotFound";
 
     // ---- API boundary messages ---------------------------------------------
     // Used by middleware, the result filter and the rate limiter. Values are the codes that

@@ -4,6 +4,21 @@ export interface NavItem {
   route: string;
   permission?: string;
   role?: string;
+  /** Shown when the user holds at least one of these roles. */
+  roles?: string[];
+  /**
+   * Hidden for family-only accounts (students / parents): they follow the same data from
+   * their own "My family" page, so the staff screens would only duplicate it.
+   */
+  hideForFamily?: boolean;
+}
+
+/** Roles of a family account; a user holding only these is a student or a parent. */
+export const FAMILY_ROLES = ['Parent', 'Student'];
+
+/** True when every role of the user is a family role. */
+export function isFamilyOnly(roles: ReadonlySet<string>): boolean {
+  return roles.size > 0 && [...roles].every((role) => FAMILY_ROLES.includes(role));
 }
 
 export interface NavGroup {
@@ -15,7 +30,8 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'nav.overview',
     items: [
-      { label: 'nav.dashboard', icon: 'pi pi-home', route: '/dashboard', permission: 'Dashboard.View' }
+      { label: 'nav.dashboard', icon: 'pi pi-home', route: '/dashboard', permission: 'Dashboard.View' },
+      { label: 'nav.myFamily', icon: 'pi pi-heart', route: '/my-family', roles: FAMILY_ROLES }
     ]
   },
   {
@@ -74,20 +90,26 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'nav.students', icon: 'pi pi-graduation-cap', route: '/students', permission: 'Students.View' },
       { label: 'nav.parents', icon: 'pi pi-users', route: '/parents', permission: 'Parents.View' },
       {
-        label: 'nav.myChildren',
-        icon: 'pi pi-heart',
-        route: '/my-children',
-        permission: 'Parents.ViewOwnChildren'
+        label: 'nav.registrationRequests',
+        icon: 'pi pi-inbox',
+        route: '/registration-requests',
+        permission: 'RegistrationRequests.View'
       }
     ]
   },
   {
     label: 'nav.teaching',
     items: [
-      { label: 'nav.groups', icon: 'pi pi-objects-column', route: '/groups', permission: 'Groups.View' },
-      { label: 'nav.sessions', icon: 'pi pi-calendar-clock', route: '/sessions', permission: 'Sessions.View' },
-      { label: 'nav.homework', icon: 'pi pi-pencil', route: '/homework', permission: 'Homework.View' },
-      { label: 'nav.exams', icon: 'pi pi-file-edit', route: '/exams', permission: 'Exams.View' }
+      { label: 'nav.groups', icon: 'pi pi-objects-column', route: '/groups', permission: 'Groups.View', hideForFamily: true },
+      {
+        label: 'nav.sessions',
+        icon: 'pi pi-calendar-clock',
+        route: '/sessions',
+        permission: 'Sessions.View',
+        hideForFamily: true
+      },
+      { label: 'nav.homework', icon: 'pi pi-pencil', route: '/homework', permission: 'Homework.View', hideForFamily: true },
+      { label: 'nav.exams', icon: 'pi pi-file-edit', route: '/exams', permission: 'Exams.View', hideForFamily: true }
     ]
   },
   {

@@ -35,3 +35,20 @@ export const roleGuard = (role: string): CanActivateFn => {
     return router.createUrlTree(['/dashboard']);
   };
 };
+
+/** Allows the route when the user holds at least one of the given roles. */
+export const anyRoleGuard = (roles: string[]): CanActivateFn => {
+  return () => {
+    const auth = inject(AuthService);
+    const router = inject(Router);
+    const notifications = inject(NotificationService);
+    const tr = inject(TranslateService);
+
+    if (roles.some((role) => auth.hasRole(role))) {
+      return true;
+    }
+
+    notifications.error(tr.t('common.forbidden'), tr.t('common.forbiddenTitle'));
+    return router.createUrlTree(['/dashboard']);
+  };
+};

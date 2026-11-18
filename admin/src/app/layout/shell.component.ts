@@ -8,7 +8,7 @@ import { TagModule } from 'primeng/tag';
 import { ToastModule } from 'primeng/toast';
 import { SUPPORTED_LANGUAGES } from '../core/app-config';
 import { TranslateService } from '../core/i18n/translate.service';
-import { NAV_GROUPS, NavGroup } from '../core/nav';
+import { isFamilyOnly, NAV_GROUPS, NavGroup } from '../core/nav';
 import { AuthService } from '../core/services/auth.service';
 import { NotificationService } from '../core/services/notification.service';
 import { NotificationBellComponent } from './notification-bell.component';
@@ -299,13 +299,16 @@ export class ShellComponent {
   protected readonly visibleGroups = computed<NavGroup[]>(() => {
     const permissions = this.auth.permissions();
     const roles = this.auth.roles();
+    const familyOnly = isFamilyOnly(roles);
 
     return NAV_GROUPS.map((group) => ({
       label: group.label,
       items: group.items.filter(
         (item) =>
           (!item.permission || permissions.has(item.permission)) &&
-          (!item.role || roles.has(item.role))
+          (!item.role || roles.has(item.role)) &&
+          (!item.roles || item.roles.some((role) => roles.has(role))) &&
+          !(item.hideForFamily && familyOnly)
       )
     })).filter((group) => group.items.length > 0);
   });

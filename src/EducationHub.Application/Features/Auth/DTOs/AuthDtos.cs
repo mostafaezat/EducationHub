@@ -61,3 +61,13 @@ public sealed record ConfirmEmailRequest(string Email, string Token);
 
 /// <summary>Email posted to <c>POST /api/auth/resend-confirmation</c>.</summary>
 public sealed record ResendConfirmationRequest(string Email);
+
+/// <summary>Mobile number posted to <c>POST /api/auth/forgot-password/phone</c>.</summary>
+public sealed record ForgotPasswordByPhoneRequest(string Phone);
+
+/// <summary>Submission for <c>POST /api/auth/reset-password/phone</c> with the code sent by WhatsApp.</summary>
+public sealed record ResetPasswordByPhoneRequest(
+    string Phone,
+    string Code,
+    string NewPassword,
+    string ConfirmPassword);

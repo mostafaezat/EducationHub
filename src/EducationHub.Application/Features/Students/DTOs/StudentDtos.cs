@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using EducationHub.Domain.Enums;
 
 namespace EducationHub.Application.Features.Students.DTOs;
@@ -29,7 +30,30 @@ public sealed record StudentProfileDto(
     DateOnly? EnrollmentDate,
     string? Notes,
     IReadOnlyList<GuardianLinkDto> Guardians,
-    DateTime CreatedAt);
+    DateTime CreatedAt)
+{
+    /// <summary>
+    /// Set only on the create response when a guardian was registered with the student; carries
+    /// the one-time temporary password of a newly created parent account.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public NewGuardianAccountDto? NewGuardian { get; init; }
+}
+
+/// <summary>
+/// The guardian registered together with a student. <see cref="TemporaryPassword"/> is shown
+/// once, to the staff member who created it; the parent must change it at first sign-in.
+/// </summary>
+public sealed record NewGuardianAccountDto(
+    Guid ParentProfileId,
+    string FullName,
+    string? Email,
+    string? PhoneNumber,
+    string? LoginName,
+    bool LinkedExistingParent,
+    bool AccountCreated,
+    string? TemporaryPassword,
+    bool WhatsAppSent = false);
 
 /// <summary>One linked student as seen from the parent side.</summary>
 public sealed record ChildLinkDto(
@@ -68,7 +92,22 @@ public sealed record CreateStudentRequest(
     string? Notes,
     Guid? UserId,
     string? AccountEmail,
-    string? AccountPassword);
+    string? AccountPassword,
+    CreateStudentGuardianRequest? Guardian = null);
+
+/// <summary>
+/// A guardian registered in the same step as the student. An existing parent of the tenant
+/// with the same e-mail (or, without an e-mail, the same mobile number) is reused and simply
+/// linked; otherwise a parent profile is created. With <see cref="CreateAccount"/> the parent
+/// also gets a sign-in account - by e-mail, or by mobile number when there is no e-mail - with a
+/// generated temporary password that must be changed at first sign-in.
+/// </summary>
+public sealed record CreateStudentGuardianRequest(
+    string? FullName,
+    string? PhoneNumber,
+    string? Email,
+    GuardianRelationship Relationship,
+    bool CreateAccount);
 
 /// <summary>Partial update: a null member leaves the field unchanged.</summary>
 public sealed record UpdateStudentRequest(

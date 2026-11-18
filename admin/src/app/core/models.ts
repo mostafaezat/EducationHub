@@ -103,6 +103,17 @@ export interface ForgotPasswordRequest {
   email: string;
 }
 
+export interface ForgotPasswordByPhoneRequest {
+  phone: string;
+}
+
+export interface ResetPasswordByPhoneRequest {
+  phone: string;
+  code: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export interface ResetPasswordRequest {
   email: string;
   resetToken: string;
@@ -592,6 +603,30 @@ export interface StudentDto {
   notes?: string | null;
   guardians: GuardianLinkDto[];
   createdAt: string;
+  /** Only on the create response, when a guardian was registered with the student. */
+  newGuardian?: NewGuardianAccountDto | null;
+}
+
+/** The guardian registered with a new student; the temporary password is shown once. */
+export interface NewGuardianAccountDto {
+  parentProfileId: string;
+  fullName: string;
+  email?: string | null;
+  phoneNumber?: string | null;
+  /** What the parent types to sign in: the e-mail, or the mobile number when there is none. */
+  loginName?: string | null;
+  linkedExistingParent: boolean;
+  accountCreated: boolean;
+  temporaryPassword?: string | null;
+  whatsAppSent?: boolean;
+}
+
+export interface CreateStudentGuardianRequest {
+  fullName: string;
+  phoneNumber: string | null;
+  email: string | null;
+  relationship: GuardianRelationship;
+  createAccount: boolean;
 }
 
 export interface ChildLinkDto {
@@ -627,6 +662,7 @@ export interface CreateStudentRequest {
   userId: string | null;
   accountEmail: string | null;
   accountPassword: string | null;
+  guardian?: CreateStudentGuardianRequest | null;
 }
 
 export interface UpdateStudentRequest {
@@ -1019,6 +1055,17 @@ export interface SubmissionRowDto {
   submittedAt?: string | null;
   grade?: number | null;
   feedback?: string | null;
+  /** Answers the student (or parent) uploaded. */
+  files?: SubmissionFileDto[];
+}
+
+export interface SubmissionFileDto {
+  id: string;
+  fileName: string;
+  contentType: string;
+  sizeInBytes: number;
+  note?: string | null;
+  uploadedAt: string;
 }
 
 export interface ExamDto {
@@ -1054,4 +1101,137 @@ export interface AppNotificationDto {
 export interface NotificationFeedDto {
   unreadCount: number;
   items: AppNotificationDto[];
+}
+
+// ---- Family view: a student or parent following their own (children's) learning ----------
+
+export interface FamilyAttendanceSummaryDto {
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  attendanceRate?: number | null;
+}
+
+export interface FamilySessionDto {
+  session: ClassSessionDto;
+  attendance?: AttendanceStatus | null;
+}
+
+export interface FamilyHomeworkDto {
+  id: string;
+  studyGroupId: string;
+  groupName?: string | null;
+  title: string;
+  description?: string | null;
+  assignedOn: string;
+  dueDate: string;
+  maxGrade?: number | null;
+  status: SubmissionStatus;
+  submittedAt?: string | null;
+  grade?: number | null;
+  feedback?: string | null;
+  files: SubmissionFileDto[];
+  /** True while the answer can still be uploaded (enrolled and not graded yet). */
+  canSubmit: boolean;
+}
+
+export interface FamilyExamDto {
+  id: string;
+  studyGroupId: string;
+  groupName?: string | null;
+  title: string;
+  examDate: string;
+  maxScore: number;
+  recorded: boolean;
+  score?: number | null;
+  isAbsent: boolean;
+  notes?: string | null;
+}
+
+export interface FamilyStudentOverviewDto {
+  studentProfileId: string;
+  fullName: string;
+  studentNumber?: string | null;
+  groups: StudyGroupDto[];
+  attendance: FamilyAttendanceSummaryDto;
+  recentSessions: FamilySessionDto[];
+  upcomingSessions: FamilySessionDto[];
+  homework: FamilyHomeworkDto[];
+  exams: FamilyExamDto[];
+  balance?: StudentBalanceDto | null;
+}
+
+// ---- Pre-registration requests (public form + staff review) ----------------
+
+export type RegistrationRequestStatus = 'Pending' | 'Approved' | 'Rejected';
+export const REGISTRATION_STATUSES: RegistrationRequestStatus[] = ['Pending', 'Approved', 'Rejected'];
+
+export interface PublicOptionDto {
+  id: string;
+  name: string;
+  nameAr?: string | null;
+}
+
+export interface PublicRegistrationFormDto {
+  tenantSlug: string;
+  centreName: string;
+  centreNameAr?: string | null;
+  gradeLevels: PublicOptionDto[];
+  subjects: PublicOptionDto[];
+}
+
+export interface SubmitRegistrationRequest {
+  guardianName: string;
+  guardianPhone: string;
+  guardianEmail?: string | null;
+  relationship: GuardianRelationship;
+  studentName: string;
+  birthDate?: string | null;
+  gradeLevelId?: string | null;
+  school?: string | null;
+  subjectIds?: string[];
+  notes?: string | null;
+  /** Honeypot - always empty for a person. */
+  website?: string | null;
+}
+
+export interface RegistrationRequestDto {
+  id: string;
+  guardianName: string;
+  guardianPhone: string;
+  guardianEmail?: string | null;
+  relationship: GuardianRelationship;
+  studentName: string;
+  birthDate?: string | null;
+  gradeLevelId?: string | null;
+  gradeLevelName?: string | null;
+  school?: string | null;
+  preferredSubjects?: string | null;
+  notes?: string | null;
+  status: RegistrationRequestStatus;
+  createdAt: string;
+  reviewedByUserId?: string | null;
+  reviewedAt?: string | null;
+  rejectionReason?: string | null;
+  createdStudentProfileId?: string | null;
+}
+
+export interface ApproveRegistrationRequest {
+  studyGroupId?: string | null;
+  studentName?: string | null;
+  birthDate?: string | null;
+  gradeLevelId?: string | null;
+  guardianName?: string | null;
+  guardianPhone?: string | null;
+  guardianEmail?: string | null;
+  relationship?: GuardianRelationship | null;
+  createAccount: boolean;
+  notes?: string | null;
+}
+
+export interface ApproveRegistrationResultDto {
+  request: RegistrationRequestDto;
+  student: StudentDto;
+  enrolled: boolean;
 }

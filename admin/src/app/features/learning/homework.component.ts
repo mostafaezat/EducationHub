@@ -11,12 +11,14 @@ import { TagModule } from 'primeng/tag';
 import { TextareaModule } from 'primeng/textarea';
 import { finalize } from 'rxjs';
 import { TranslateService } from '../../core/i18n/translate.service';
-import { HomeworkDto, SUBMISSION_STATUSES, SubmissionRowDto } from '../../core/models';
+import { HomeworkDto, SUBMISSION_STATUSES, SubmissionFileDto, SubmissionRowDto } from '../../core/models';
 import { AuthService } from '../../core/services/auth.service';
+import { FilesService } from '../../core/services/files.service';
 import { LearningService } from '../../core/services/learning.service';
 import { LookupsService } from '../../core/services/lookups.service';
 import { NotificationService } from '../../core/services/notification.service';
 import { Option, todayIso } from '../shared/ops-utils';
+import { saveBlob } from '../shared/save-blob';
 
 /** Homework per group, with a submissions/grading sheet (Mission Phase 6). */
 @Component({
@@ -106,6 +108,7 @@ import { Option, todayIso } from '../shared/ops-utils';
             <th style="width:11rem">{{ t('common.status') }}</th>
             <th style="width:8rem">{{ t('homework.grade') }}</th>
             <th>{{ t('homework.feedback') }}</th>
+            <th style="width:11rem">{{ t('homework.answers') }}</th>
           </tr>
         </ng-template>
         <ng-template pTemplate="body" let-row>
@@ -114,10 +117,19 @@ import { Option, todayIso } from '../shared/ops-utils';
             <td><p-select [options]="statusOptions" [(ngModel)]="row.status" optionLabel="label" optionValue="value" [disabled]="!canManage()" appendTo="body" /></td>
             <td><p-inputNumber [(ngModel)]="row.grade" [min]="0" [max]="maxGrade() ?? undefined" [maxFractionDigits]="2" [disabled]="!canManage()" inputStyleClass="w-grade" /></td>
             <td><input pInputText [(ngModel)]="row.feedback" [disabled]="!canManage()" style="width:100%" /></td>
+            <td>
+              @for (file of row.files ?? []; track file.id) {
+                <button type="button" class="file-link" [title]="file.note ?? ''" (click)="downloadAnswer(file)">
+                  <i class="pi pi-paperclip"></i> {{ file.fileName }}
+                </button>
+              } @empty {
+                <span class="muted">—</span>
+              }
+            </td>
           </tr>
         </ng-template>
         <ng-template pTemplate="emptymessage">
-          <tr><td colspan="4"><div class="muted">{{ t('groups.noStudents') }}</div></td></tr>
+          <tr><td colspan="5"><div class="muted">{{ t('groups.noStudents') }}</div></td></tr>
         </ng-template>
       </p-table>
       <ng-template pTemplate="footer">
@@ -131,6 +143,7 @@ import { Option, todayIso } from '../shared/ops-utils';
   styles: [
     `
       .muted { color: #94a3b8; font-size: 0.8rem; }
+      .file-link { display: block; background: none; border: none; color: #2563eb; cursor: pointer; padding: 0.1rem 0; font: inherit; font-size: 0.82rem; text-align: start; }
       :host ::ng-deep .w-grade { width: 6rem; }
     `
   ]
@@ -140,6 +153,7 @@ export class HomeworkComponent implements OnInit {
   private readonly lookups = inject(LookupsService);
   private readonly auth = inject(AuthService);
   private readonly notifications = inject(NotificationService);
+  private readonly files = inject(FilesService);
 
   protected readonly t = inject(TranslateService).t;
   protected readonly today = todayIso();
@@ -254,5 +268,9 @@ export class HomeworkComponent implements OnInit {
 
   private empty() {
     return { studyGroupId: null as string | null, title: '', description: '', dueDate: todayIso(7), maxGrade: null as number | null };
+  }
+
+  protected downloadAnswer(file: SubmissionFileDto): void {
+    this.files.download(file.id).subscribe((blob) => saveBlob(blob, file.fileName));
   }
 }

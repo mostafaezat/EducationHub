@@ -32,6 +32,9 @@ public sealed class OperationsSecurityTests(ApiTestFixture fixture)
         "/api/files"
     ];
 
+    /// <summary>Teaching reads a student/parent may open; the rows are narrowed to their own family.</summary>
+    private static readonly string[] FamilyReadable = ["/api/groups", "/api/sessions", "/api/homework", "/api/exams"];
+
     [Fact]
     public async Task Every_new_endpoint_rejects_anonymous_callers_with_401()
     {
@@ -61,7 +64,8 @@ public sealed class OperationsSecurityTests(ApiTestFixture fixture)
             foreach (var path in ProtectedReads)
             {
                 using var response = await Client.GetAsync(path, caller);
-                Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{email}: GET {path} returned {(int)response.StatusCode}.");
+                var expected = FamilyReadable.Contains(path) ? HttpStatusCode.OK : HttpStatusCode.Forbidden;
+                Assert.True(response.StatusCode == expected, $"{email}: GET {path} returned {(int)response.StatusCode}.");
             }
 
             using var write = await Client.PostJsonAsync("/api/finance/expense-categories", new { name = "Sneaky" }, caller);
@@ -97,6 +101,16 @@ public sealed class OperationsSecurityTests(ApiTestFixture fixture)
         var permissions = me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToList();
         Assert.DoesNotContain(permissions, p => p!.StartsWith("Students.", StringComparison.Ordinal) || p.StartsWith("Fees.", StringComparison.Ordinal));
         Assert.Contains(PermissionConstants.PlatformManageTenants, permissions);
+
+        // Its roles and permission screens work without a tenant: platform roles only.
+        var roles = await ModuleTestHelpers.GetDataAsync(Client, "/api/roles", platform);
+        Assert.Contains(roles.GetProperty("items").EnumerateArray(), r => r.GetProperty("name").GetString() == RoleNames.PlatformAdmin);
+        Assert.DoesNotContain(roles.GetProperty("items").EnumerateArray(), r => r.GetProperty("name").GetString() == RoleNames.TenantAdmin);
+
+        var catalog = await ModuleTestHelpers.GetDataAsync(Client, "/api/permissions", platform);
+        var areas = catalog.EnumerateArray().Select(a => a.GetProperty("area").GetString()).ToList();
+        Assert.Contains("Tenants", areas);
+        Assert.DoesNotContain("Students", areas);
     }
 
     [Fact]
@@ -143,9 +157,48 @@ public sealed class OperationsSecurityTests(ApiTestFixture fixture)
         var (_, token) = await ModuleTestHelpers.ProvisionAndLoginAsync(Client, "sec-tch");
         var (groupId, _, _) = await SchoolArrangement.GroupWithStudentsAsync(Client, token, 1);
 
+        var (otherGroupId, _, otherStudents) = await SchoolArrangement.GroupWithStudentsAsync(Client, token, 1, name: "Someone Else's");
+
         var teacherEmail = ApiScenarios.NewEmail("tch");
-        await ModuleTestHelpers.PostDataAsync(Client, "/api/teachers", new { email = teacherEmail, password = "Teach3rPass", fullName = "Teaching Only" }, token);
+        var profile = await ModuleTestHelpers.PostDataAsync(Client, "/api/teachers", new { email = teacherEmail, password = "Teach3rPass", fullName = "Teaching Only" }, token);
+        await ModuleTestHelpers.PutDataAsync(Client, $"/api/groups/{groupId}", new { teacherProfileId = profile.Id() }, token);
         var teacher = await ApiScenarios.LoginTokenAsync(Client, teacherEmail, "Teach3rPass");
+
+        // A teacher sees and manages their own group only.
+        var visibleGroups = await ModuleTestHelpers.GetDataAsync(Client, "/api/groups", teacher);
+        var onlyGroup = Assert.Single(visibleGroups.GetProperty("items").EnumerateArray());
+        Assert.Equal(groupId, onlyGroup.Id());
+
+        using (var foreignGroup = await Client.GetAsync($"/api/groups/{otherGroupId}", teacher))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, foreignGroup.StatusCode);
+        }
+
+        using (var foreignHomework = await Client.PostJsonAsync("/api/homework", new { studyGroupId = otherGroupId, title = "X", dueDate = "2026-11-20" }, teacher))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, foreignHomework.StatusCode);
+        }
+
+        var visibleStudents = await ModuleTestHelpers.GetDataAsync(Client, "/api/students", teacher);
+        Assert.Single(visibleStudents.GetProperty("items").EnumerateArray());
+
+        // Documents of another group's student stay hidden from the teacher.
+        using (var upload = await ModuleTestHelpers.UploadAsync(
+                   Client, token, "card.txt", "text/plain", "report card"u8.ToArray(),
+                   new Dictionary<string, string> { ["OwnerEntityName"] = "Student", ["OwnerEntityId"] = otherStudents[0].ToString(), ["Category"] = "StudentDocument" }))
+        {
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+        }
+
+        var teacherFiles = await ModuleTestHelpers.GetDataAsync(Client, "/api/files", teacher);
+        Assert.Empty(teacherFiles.EnumerateArray());
+
+        using (var foreignUpload = await ModuleTestHelpers.UploadAsync(
+                   Client, teacher, "x.txt", "text/plain", "report card"u8.ToArray(),
+                   new Dictionary<string, string> { ["OwnerEntityName"] = "Student", ["OwnerEntityId"] = otherStudents[0].ToString(), ["Category"] = "StudentDocument" }))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, foreignUpload.StatusCode);
+        }
 
         var assistantEmail = ApiScenarios.NewEmail("asst");
         await ApiScenarios.CreateUserAsync(Client, token, "Assistant", assistantEmail, "Ass1stantPass", [RoleNames.Assistant]);

@@ -32,6 +32,8 @@ const string CorsPolicyName = "DefaultCors";
 // endpoint is unrestricted: the tenant query filter isolates data, and a blanket limiter
 // would let an attacker DoS a tenancy by exhausting its share of a shared IP.
 const string AuthCredentialRateLimitPolicy = "auth-credential";
+const string PhoneResetRateLimitPolicy = RateLimitPolicies.PhoneReset;
+const string PublicRegistrationRateLimitPolicy = RateLimitPolicies.PublicRegistration;
 
 // Serilog is configured first and before the host is built, so that failures during startup
 // are logged too rather than only reaching the console.
@@ -46,6 +48,28 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
+
+// WhatsApp: the provider is a configuration choice (None by default, Log in development, Meta
+// for the WhatsApp Cloud API). Meta needs an HttpClient, which is why the sender is wired here.
+builder.Services.Configure<global::EducationHub.Application.Common.Messaging.WhatsAppOptions>(
+    builder.Configuration.GetSection(global::EducationHub.Application.Common.Messaging.WhatsAppOptions.SectionName));
+
+// Not an interpolated string: `{global::X}` would read the `:` as the start of a format clause.
+const string WhatsAppSection = global::EducationHub.Application.Common.Messaging.WhatsAppOptions.SectionName;
+var whatsAppProvider = builder.Configuration[WhatsAppSection + ":Provider"] ?? "None";
+
+if (string.Equals(whatsAppProvider, "Meta", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient<IWhatsAppSender, MetaWhatsAppSender>(client => client.Timeout = TimeSpan.FromSeconds(10));
+}
+else if (string.Equals(whatsAppProvider, "Log", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<IWhatsAppSender, LogWhatsAppSender>();
+}
+else
+{
+    builder.Services.AddScoped<IWhatsAppSender, DisabledWhatsAppSender>();
+}
 
 // Registered after the Application layer, which declares the interface but cannot implement
 // it: resolving correlation ids requires HttpContext, which the Application project must not
@@ -144,7 +168,9 @@ builder.Services.AddScoped<EducationHub.API.Seed.AcademicSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoTeacherSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoStudentParentSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoStudentProfileSeeder>();
+builder.Services.AddScoped<EducationHub.API.Seed.DemoStaffSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DemoOperationsSeeder>();
+builder.Services.AddScoped<EducationHub.API.Seed.DemoRegistrationRequestSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DevelopmentDataSeeder>();
 builder.Services.AddScoped<EducationHub.API.Seed.DatabaseSeeder>();
 
@@ -158,33 +184,28 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    options.OnRejected = static async (context, cancellationToken) =>
+    options.OnRejected = static (context, cancellationToken) =>
+        new ValueTask(RateLimitResponses.WriteAsync(context.HttpContext, RateLimitResponses.RetryAfterSeconds, cancellationToken));
+
+    // Phone password reset, per remote IP. The per-number budget is PhoneResetRateLimiter.
+    options.AddPolicy(PhoneResetRateLimitPolicy, httpContext =>
     {
-        var httpContext = context.HttpContext;
+        var limits = httpContext.RequestServices.GetRequiredService<IOptions<AuthRateLimitOptions>>().Value.PhoneReset;
 
-        httpContext.Response.Headers.RetryAfter = "60";
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { Window = limits.Window, PermitLimit = limits.PermitLimit, QueueLimit = 0 });
+    });
 
-        // The limiter runs before UseAuthentication, so no request culture has been applied
-        // yet and there is no token to read a language preference from. The catalog is read
-        // directly with Accept-Language (falling back to Arabic) instead.
-        var store = httpContext.RequestServices.GetRequiredService<JsonResourceStore>();
+    // Anonymous pre-registration form, per remote IP.
+    options.AddPolicy(PublicRegistrationRateLimitPolicy, httpContext =>
+    {
+        var limits = httpContext.RequestServices.GetRequiredService<IOptions<AuthRateLimitOptions>>().Value.PublicRegistration;
 
-        await httpContext.Response.WriteAsJsonAsync(
-            new ProblemDetails
-            {
-                Status = StatusCodes.Status429TooManyRequests,
-
-                // Kept as a fixed string: the 429 is identified by status and Retry-After,
-                // and this title is not part of what carries the translation.
-                Title = "Too many attempts",
-                Detail = BoundaryMessages.Resolve(
-                    store,
-                    httpContext,
-                    LocalizationKeys.RateLimited,
-                    "Too many credential attempts from this address. Try again shortly.")
-            },
-            cancellationToken).ConfigureAwait(false);
-    };
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { Window = limits.Window, PermitLimit = limits.PermitLimit, QueueLimit = 0 });
+    });
 
     options.AddPolicy(AuthCredentialRateLimitPolicy, httpContext =>
     {
@@ -205,6 +226,7 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.Configure<AuthRateLimitOptions>(
     builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));
+builder.Services.AddSingleton<PhoneResetRateLimiter>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

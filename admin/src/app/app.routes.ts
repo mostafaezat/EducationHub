@@ -1,7 +1,8 @@
 import { Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell.component';
 import { authGuard, guestGuard, requireAuthGuard } from './core/guards/auth.guard';
-import { permissionGuard } from './core/guards/permission.guard';
+import { anyRoleGuard, permissionGuard } from './core/guards/permission.guard';
+import { FAMILY_ROLES } from './core/nav';
 
 export const routes: Routes = [
   {
@@ -28,6 +29,12 @@ export const routes: Routes = [
     path: 'auth/reset-password',
     loadComponent: () =>
       import('./features/auth/reset-password.component').then((m) => m.ResetPasswordComponent)
+  },
+  // Public pre-registration page of a centre: anonymous, outside the shell, no guard.
+  {
+    path: 'register/:tenantSlug',
+    loadComponent: () =>
+      import('./features/registration/public-registration.component').then((m) => m.PublicRegistrationComponent)
   },
   {
     path: 'auth/confirm-email',
@@ -110,6 +117,12 @@ export const routes: Routes = [
           import('./features/students/students.component').then((m) => m.StudentsComponent)
       },
       {
+        path: 'registration-requests',
+        canActivate: [permissionGuard('RegistrationRequests.View')],
+        loadComponent: () =>
+          import('./features/registration/registration-requests.component').then((m) => m.RegistrationRequestsComponent)
+      },
+      {
         path: 'parents',
         canActivate: [permissionGuard('Parents.View')],
         loadComponent: () =>
@@ -120,6 +133,12 @@ export const routes: Routes = [
         canActivate: [permissionGuard('Parents.ViewOwnChildren')],
         loadComponent: () =>
           import('./features/parents/my-children.component').then((m) => m.MyChildrenComponent)
+      },
+      {
+        path: 'my-family',
+        canActivate: [anyRoleGuard(FAMILY_ROLES)],
+        loadComponent: () =>
+          import('./features/family/my-family.component').then((m) => m.MyFamilyComponent)
       },
       {
         path: 'groups',

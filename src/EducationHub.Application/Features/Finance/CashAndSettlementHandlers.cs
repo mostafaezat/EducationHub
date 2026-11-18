@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Extensions;
 using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Interfaces;
@@ -609,23 +610,59 @@ public sealed class GetDashboardKpisQueryHandler(
     IRepository<Charge> charges,
     IRepository<Payment> payments,
     IRepository<Expense> expenses,
-    IDateTimeService clock)
+    IDateTimeService clock,
+    ITenantContext tenantContext,
+    DataScopeService dataScope)
     : IRequestHandler<GetDashboardKpisQuery, Result<DashboardKpisDto>>
 {
     public async Task<Result<DashboardKpisDto>> Handle(GetDashboardKpisQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // Operational figures belong to one centre. Without a tenant (the platform administrator)
+        // the query filters are bypassed and the counts would add every centre together.
+        if (tenantContext.TenantId is not { } tenantId || tenantId == Guid.Empty)
+        {
+            return Result<DashboardKpisDto>.Failure("Dashboard.TenantContextRequired", "The dashboard figures need a tenant context.");
+        }
+
         var today = clock.GetTenantToday();
         var since = today.AddDays(-30);
         var monthStart = new DateOnly(today.Year, today.Month, 1);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
 
-        var activeStudents = await students.Query.CountAsync(static s => s.Status == StudentStatus.Active, cancellationToken).ConfigureAwait(false);
-        var activeGroups = await groups.Query.CountAsync(static g => g.IsActive, cancellationToken).ConfigureAwait(false);
-        var activeTeachers = await teachers.Query.CountAsync(static t => t.IsActive, cancellationToken).ConfigureAwait(false);
-        var sessionsToday = await sessions.Query.CountAsync(s => s.Date == today && s.Status != SessionStatus.Cancelled, cancellationToken).ConfigureAwait(false);
+        // A teacher counts their own groups, a family its own children; management sees the centre.
+        var studentQuery = students.Query;
+        var groupQuery = groups.Query;
+        var teacherQuery = teachers.Query;
+        var sessionQuery = sessions.Query;
+        var attendanceQuery = attendance.Query;
 
-        var recent = sessions.Query.Where(s => s.Date >= since && s.Date <= today).Select(static s => s.Id);
-        var marks = attendance.Query.Where(a => recent.Contains(a.ClassSessionId));
+        if (!scope.IsUnrestricted)
+        {
+            var visibleStudents = scope.StudentIds.ToArray();
+            var visibleGroups = scope.GroupIds.ToArray();
+            var ownTeacherIds = scope.TeacherProfileIds.ToArray();
+
+            studentQuery = studentQuery.Where(s => visibleStudents.Contains(s.Id));
+            groupQuery = groupQuery.Where(g => visibleGroups.Contains(g.Id));
+            teacherQuery = teacherQuery.Where(t => groups.Query.Any(g => visibleGroups.Contains(g.Id) && g.TeacherProfileId == t.Id));
+            sessionQuery = sessionQuery.Where(s => visibleGroups.Contains(s.StudyGroupId)
+                || (s.TeacherProfileId != null && ownTeacherIds.Contains(s.TeacherProfileId.Value)));
+
+            if (scope.IsFamily)
+            {
+                attendanceQuery = attendanceQuery.Where(a => visibleStudents.Contains(a.StudentProfileId));
+            }
+        }
+
+        var activeStudents = await studentQuery.CountAsync(static s => s.Status == StudentStatus.Active, cancellationToken).ConfigureAwait(false);
+        var activeGroups = await groupQuery.CountAsync(static g => g.IsActive, cancellationToken).ConfigureAwait(false);
+        var activeTeachers = await teacherQuery.CountAsync(static t => t.IsActive, cancellationToken).ConfigureAwait(false);
+        var sessionsToday = await sessionQuery.CountAsync(s => s.Date == today && s.Status != SessionStatus.Cancelled, cancellationToken).ConfigureAwait(false);
+
+        var recent = sessionQuery.Where(s => s.Date >= since && s.Date <= today).Select(static s => s.Id);
+        var marks = attendanceQuery.Where(a => recent.Contains(a.ClassSessionId));
         var total = await marks.CountAsync(cancellationToken).ConfigureAwait(false);
         var present = await marks.CountAsync(static a => a.Status == AttendanceStatus.Present || a.Status == AttendanceStatus.Late, cancellationToken).ConfigureAwait(false);
         decimal? rate = total == 0 ? null : Math.Round(100m * present / total, 1);

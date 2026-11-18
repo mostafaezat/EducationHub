@@ -49,6 +49,9 @@ public static class DependencyInjection
         // link/create step used by the student and parent create commands.
         services.AddScoped<Features.Students.Services.StudentReadModel>();
         services.AddScoped<Features.Students.Services.ProfileAccountSupport>();
+        services.AddScoped<Features.Students.Services.StudentRegistrationService>();
+        services.AddScoped<Features.Registration.PublicRegistrationReader>();
+        services.AddScoped<Features.Registration.RegistrationRequestReadModel>();
 
         // Scheduling (Mission Phase 3).
         services.AddScoped<Features.Scheduling.SchedulingReadModel>();
@@ -62,6 +65,13 @@ public static class DependencyInjection
 
         // Homework, exams and in-app notifications (Mission Phase 6).
         services.AddScoped<Features.Learning.NotificationService>();
+
+        // Row-level visibility: a teacher sees their own groups, a student/parent their own family.
+        services.AddScoped<Common.Access.DataScopeService>();
+
+        // WhatsApp messages (sign-in details for new parents, learning updates). The sender itself
+        // (IWhatsAppSender) is chosen by configuration in the API host.
+        services.AddScoped<Common.Messaging.WhatsAppMessenger>();
 
         return services;
     }

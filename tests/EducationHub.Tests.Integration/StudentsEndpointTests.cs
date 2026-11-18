@@ -249,6 +249,90 @@ public sealed class StudentsEndpointTests(ApiTestFixture fixture)
         Assert.Equal(0, (await student.ReadJsonAsync()).GetProperty("data").GetProperty("guardians").GetArrayLength());
     }
 
+    [Fact]
+    public async Task Registering_a_student_with_a_guardian_creates_the_parent_account_with_a_temporary_password()
+    {
+        var (_, token) = await ProvisionAndLoginAsync("stu-guard");
+        var parentEmail = ApiScenarios.NewEmail("guard");
+        var parentPhone = RandomMobile();
+
+        var student = await CreateStudentAsync(token, new
+        {
+            fullName = "Yassin Adel",
+            guardian = new { fullName = "Adel Mahmoud", phoneNumber = parentPhone, email = parentEmail, relationship = "Father", createAccount = true }
+        });
+
+        var guardian = student.GetProperty("newGuardian");
+        Assert.True(guardian.GetProperty("accountCreated").GetBoolean());
+        Assert.False(guardian.GetProperty("linkedExistingParent").GetBoolean());
+        var temporary = guardian.GetProperty("temporaryPassword").GetString()!;
+        Assert.Equal(10, temporary.Length);
+
+        var link = Assert.Single(student.GetProperty("guardians").EnumerateArray());
+        Assert.Equal("Father", link.GetProperty("relationship").GetString());
+
+        // The parent signs in with the temporary password and is told to change it - with the
+        // e-mail, or with the mobile number typed in any common shape.
+        var session = await ApiScenarios.LoginAsync(Client, parentEmail, temporary);
+        Assert.True(session.Data.GetProperty("user").GetProperty("mustChangePassword").GetBoolean());
+        await ApiScenarios.LoginAsync(Client, parentPhone, temporary);
+        await ApiScenarios.LoginAsync(Client, "+2" + parentPhone, temporary);
+
+        // The development WhatsApp provider (Log) accepted the sign-in details.
+        Assert.True(guardian.GetProperty("whatsAppSent").GetBoolean());
+
+        // A second child with the same guardian e-mail reuses the parent instead of duplicating it.
+        var sibling = await CreateStudentAsync(token, new
+        {
+            fullName = "Malak Adel",
+            guardian = new { fullName = "Adel Mahmoud", email = parentEmail, relationship = "Father", createAccount = true }
+        });
+        var reused = sibling.GetProperty("newGuardian");
+        Assert.True(reused.GetProperty("linkedExistingParent").GetBoolean());
+        Assert.False(reused.GetProperty("accountCreated").GetBoolean());
+        Assert.Equal(guardian.GetProperty("parentProfileId").GetGuid(), reused.GetProperty("parentProfileId").GetGuid());
+
+        // Asking for an account without an e-mail is rejected and nothing is created.
+        using var noEmail = await Client.PostJsonAsync("/api/students", new
+        {
+            fullName = "Nour Adel",
+            guardian = new { fullName = "Someone Else", relationship = "Mother", createAccount = true }
+        }, token);
+        Assert.Equal(HttpStatusCode.BadRequest, noEmail.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_guardian_without_e_mail_gets_an_account_that_signs_in_with_the_mobile_number()
+    {
+        var (_, token) = await ProvisionAndLoginAsync("stu-phone");
+        var phone = RandomMobile();
+
+        var student = await CreateStudentAsync(token, new
+        {
+            fullName = "Hana Samir",
+            guardian = new { fullName = "Samir Fathy", phoneNumber = phone, relationship = "Father", createAccount = true }
+        });
+
+        var guardian = student.GetProperty("newGuardian");
+        Assert.True(guardian.GetProperty("accountCreated").GetBoolean());
+        Assert.Equal("+2" + phone, guardian.GetProperty("loginName").GetString());
+
+        var session = await ApiScenarios.LoginAsync(Client, phone, guardian.GetProperty("temporaryPassword").GetString()!);
+        Assert.Contains("Parent", session.Data.GetProperty("user").GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
+
+        // A second child of the same father (same mobile, no e-mail) is linked to him.
+        var sibling = await CreateStudentAsync(token, new
+        {
+            fullName = "Omar Samir",
+            guardian = new { fullName = "Samir Fathy", phoneNumber = phone, relationship = "Father", createAccount = true }
+        });
+        Assert.True(sibling.GetProperty("newGuardian").GetProperty("linkedExistingParent").GetBoolean());
+    }
+
+    /// <summary>A unique Egyptian-style mobile number (01XXXXXXXXX) per call; the test database persists across runs.</summary>
+    private static string RandomMobile()
+        => "010" + Random.Shared.NextInt64(10_000_000, 99_999_999).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     private async Task<(TenantAdmin Tenant, string Token)> ProvisionAndLoginAsync(string prefix)
     {
         var platform = await ApiScenarios.PlatformAdminTokenAsync(Client);

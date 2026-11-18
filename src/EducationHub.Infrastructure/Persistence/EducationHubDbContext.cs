@@ -46,6 +46,7 @@ public interface IApplicationDbContext
     DbSet<StudentProfile> StudentProfiles { get; }
     DbSet<ParentProfile> ParentProfiles { get; }
     DbSet<StudentGuardian> StudentGuardians { get; }
+    DbSet<RegistrationRequest> RegistrationRequests { get; }
     DbSet<StudyGroup> StudyGroups { get; }
     DbSet<Enrollment> Enrollments { get; }
     DbSet<ScheduleSlot> ScheduleSlots { get; }
@@ -128,6 +129,7 @@ public class EducationHubDbContext(
     public DbSet<StudentProfile> StudentProfiles => Set<StudentProfile>();
     public DbSet<ParentProfile> ParentProfiles => Set<ParentProfile>();
     public DbSet<StudentGuardian> StudentGuardians => Set<StudentGuardian>();
+    public DbSet<RegistrationRequest> RegistrationRequests => Set<RegistrationRequest>();
     public DbSet<StudyGroup> StudyGroups => Set<StudyGroup>();
     public DbSet<Enrollment> Enrollments => Set<Enrollment>();
     public DbSet<ScheduleSlot> ScheduleSlots => Set<ScheduleSlot>();

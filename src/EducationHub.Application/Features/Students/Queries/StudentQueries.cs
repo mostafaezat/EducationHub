@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Extensions;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Students.DTOs;
@@ -23,7 +24,8 @@ public sealed record GetStudentsQuery(
 
 public sealed class GetStudentsQueryHandler(
     IRepository<StudentProfile> students,
-    StudentReadModel readModel)
+    StudentReadModel readModel,
+    DataScopeService dataScope)
     : IRequestHandler<GetStudentsQuery, Result<PaginatedList<StudentProfileDto>>>
 {
     public async Task<Result<PaginatedList<StudentProfileDto>>> Handle(
@@ -32,7 +34,15 @@ public sealed class GetStudentsQueryHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = students.Query;
+
+        // A teacher sees the students of their own groups only.
+        if (!scope.IsUnrestricted)
+        {
+            var visible = scope.StudentIds.ToArray();
+            query = query.Where(s => visible.Contains(s.Id));
+        }
 
         if (request.GradeLevelId.HasValue)
         {
@@ -70,7 +80,8 @@ public sealed record GetStudentQuery(Guid Id) : IRequest<Result<StudentProfileDt
 
 public sealed class GetStudentQueryHandler(
     IRepository<StudentProfile> students,
-    StudentReadModel readModel)
+    StudentReadModel readModel,
+    DataScopeService dataScope)
     : IRequestHandler<GetStudentQuery, Result<StudentProfileDto>>
 {
     public async Task<Result<StudentProfileDto>> Handle(
@@ -79,7 +90,10 @@ public sealed class GetStudentQueryHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var profile = await students.GetByIdAsync(request.Id, cancellationToken).ConfigureAwait(false);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+        var profile = scope.CanSeeStudent(request.Id)
+            ? await students.GetByIdAsync(request.Id, cancellationToken).ConfigureAwait(false)
+            : null;
 
         return profile is null
             ? Result<StudentProfileDto>.Failure("Students.NotFound", "Student not found.")

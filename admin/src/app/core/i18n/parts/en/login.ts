@@ -1,10 +1,12 @@
 export const EN_LOGIN: Record<string, string> = {
   'login.subtitle': 'Administration console',
+  'login.form.identifierLabel': 'Email or mobile number',
+  'login.form.identifierPlaceholder': 'name@example.com or 01012345678',
   'login.form.passwordLabel': 'Password',
   'login.form.rememberMe': 'Remember me',
   'login.signIn': 'Sign in',
   'login.welcomeBack': 'Welcome back, {name}.',
-  'login.signInFailed': 'Sign in failed. Check your email and password.',
+  'login.signInFailed': 'Sign in failed. Check your email / mobile number and password.',
   'login.forgotPassword': 'Forgot password?',
   'login.emailNotConfirmedHint': "This account's email address has not been confirmed yet.",
 
@@ -15,6 +17,18 @@ export const EN_LOGIN: Record<string, string> = {
     'If an account exists for {email}, a reset link is on its way. Check your inbox - in development, the link appears in the API log.',
   'forgot.backToLogin': 'Back to sign in',
   'forgot.failed': 'Could not start the password reset. Please try again.',
+  'forgot.byEmail': 'Email',
+  'forgot.byPhone': 'Mobile',
+  'forgot.phoneSubtitle': 'Enter your mobile number and we will send a 6-digit code by WhatsApp.',
+  'forgot.phone': 'Mobile number',
+  'forgot.phonePlaceholder': '01012345678',
+  'forgot.sendCode': 'Send code',
+  'forgot.codeSent':
+    'If {phone} is registered, a 6-digit code has been sent by WhatsApp. It is valid for a few minutes.',
+  'forgot.code': 'Code from WhatsApp',
+  'forgot.resendCode': 'Send a new code',
+  'forgot.changeNumber': 'Change number',
+  'forgot.codeInvalid': 'Enter the 6 digits from the WhatsApp message.',
 
   'reset.title': 'Choose a new password',
   'reset.subtitle': 'The reset link was opened for {email}.',

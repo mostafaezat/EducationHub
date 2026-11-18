@@ -659,9 +659,9 @@ public sealed class DemoOperationsSeeder(
         foreach (var userId in studentUserIds.Concat(parentUserIds).Distinct())
         {
             context.Notifications.AddRange(
-                new Notification { TenantId = tenantId, UserId = userId, Title = "New homework: Worksheet 2", Body = $"{groupA.Group.Name} - due {today.AddDays(5):yyyy-MM-dd}", Link = "/homework" },
-                new Notification { TenantId = tenantId, UserId = userId, Title = "Exam result: Monthly quiz", Body = $"{groupA.Group.Name}", Link = "/exams" },
-                new Notification { TenantId = tenantId, UserId = userId, Title = "New homework: Worksheet 1", Body = $"{groupA.Group.Name}", Link = "/homework", IsRead = true, ReadAt = DateTime.UtcNow.AddDays(-9) });
+                new Notification { TenantId = tenantId, UserId = userId, Title = "New homework: Worksheet 2", Body = $"{groupA.Group.Name} - due {today.AddDays(5):yyyy-MM-dd}", Link = "/my-family" },
+                new Notification { TenantId = tenantId, UserId = userId, Title = "Exam result: Monthly quiz", Body = $"{groupA.Group.Name}", Link = "/my-family" },
+                new Notification { TenantId = tenantId, UserId = userId, Title = "New homework: Worksheet 1", Body = $"{groupA.Group.Name}", Link = "/my-family", IsRead = true, ReadAt = DateTime.UtcNow.AddDays(-9) });
             notified++;
         }
 

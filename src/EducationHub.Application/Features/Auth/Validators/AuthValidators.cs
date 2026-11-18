@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Validation;
 using EducationHub.Application.Features.Auth.Commands;
 using EducationHub.Shared.Common.Localization;
@@ -11,10 +12,19 @@ public sealed class LoginRequestValidator : LocalizedValidator<DTOs.LoginRequest
     public LoginRequestValidator(IStringLocalizer<LocalizationResource>? localizer = null)
         : base(localizer)
     {
+        // "Email" carries either an e-mail address or a mobile number.
         RuleFor(x => x.Email)
             .NotEmpty().WithMessage(_ => Message(LocalizationKeys.EmailRequired, "Email is required."))
-            .MaximumLength(256).WithMessage(_ => Message(LocalizationKeys.EmailMaxLength, "Email must not exceed 256 characters."))
-            .EmailAddress().WithMessage(_ => Message(LocalizationKeys.EmailInvalid, "Email is not a valid address."));
+            .MaximumLength(256).WithMessage(_ => Message(LocalizationKeys.EmailMaxLength, "Email must not exceed 256 characters."));
+
+        RuleFor(x => x.Email)
+            .EmailAddress().WithMessage(_ => Message(LocalizationKeys.EmailInvalid, "Email is not a valid address."))
+            .When(static x => !string.IsNullOrWhiteSpace(x.Email) && !PhoneNumberFormat.LooksLikePhone(x.Email) && x.Email.Contains('@', StringComparison.Ordinal));
+
+        RuleFor(x => x.Email)
+            .Must(static value => value.Contains('@', StringComparison.Ordinal) || PhoneNumberFormat.LooksLikePhone(value))
+            .WithMessage(_ => Message(LocalizationKeys.LoginIdentifierInvalid, "Enter an e-mail address or a mobile number."))
+            .When(static x => !string.IsNullOrWhiteSpace(x.Email));
 
         RuleFor(x => x.Password)
             .NotEmpty().WithMessage(_ => Message(LocalizationKeys.PasswordRequired, "Password is required."))

@@ -56,6 +56,13 @@ describe('authInterceptor', () => {
     backend.match(() => true).forEach((r) => r.flush({}));
   });
 
+  it('never attaches a staff token to the public registration page', () => {
+    http.get('/api/public/registration/some-centre').subscribe();
+
+    expect(backend.expectOne('/api/public/registration/some-centre').request.headers.has('Authorization')).toBeFalse();
+    backend.match(() => true).forEach((r) => r.flush({}));
+  });
+
   it('sends the request without a token when no valid session exists', () => {
     auth.ensureValidTokenResult = of(false);
 

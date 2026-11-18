@@ -1,10 +1,12 @@
 export const AR_LOGIN: Record<string, string> = {
   'login.subtitle': 'وحدة الإدارة',
+  'login.form.identifierLabel': 'البريد الإلكتروني أو رقم الموبايل',
+  'login.form.identifierPlaceholder': 'name@example.com أو 01012345678',
   'login.form.passwordLabel': 'كلمة المرور',
   'login.form.rememberMe': 'تذكرني',
   'login.signIn': 'تسجيل الدخول',
   'login.welcomeBack': 'مرحبًا بعودتك، {name}.',
-  'login.signInFailed': 'فشل تسجيل الدخول. تحقق من بريدك الإلكتروني وكلمة المرور.',
+  'login.signInFailed': 'فشل تسجيل الدخول. تأكد من البريد الإلكتروني أو رقم الموبايل وكلمة المرور.',
   'login.forgotPassword': 'هل نسيت كلمة المرور؟',
   'login.emailNotConfirmedHint': 'لم يتم تأكيد بريد هذا الحساب الإلكتروني بعد.',
 
@@ -15,6 +17,18 @@ export const AR_LOGIN: Record<string, string> = {
     'إذا كان هناك حساب مرتبط بـ {email}، فسيصلك رابط إعادة التعيين. تحقق من بريدك - في بيئة التطوير يظهر الرابط في سجل الخادم.',
   'forgot.backToLogin': 'العودة إلى تسجيل الدخول',
   'forgot.failed': 'تعذر بدء إعادة تعيين كلمة المرور. حاول مرة أخرى.',
+  'forgot.byEmail': 'البريد الإلكتروني',
+  'forgot.byPhone': 'الموبايل',
+  'forgot.phoneSubtitle': 'أدخل رقم موبايلك وسنرسل لك رمزًا من 6 أرقام على واتساب.',
+  'forgot.phone': 'رقم الموبايل',
+  'forgot.phonePlaceholder': '01012345678',
+  'forgot.sendCode': 'إرسال الرمز',
+  'forgot.codeSent':
+    'إذا كان الرقم {phone} مسجلًا، فقد تم إرسال رمز من 6 أرقام على واتساب. الرمز صالح لبضع دقائق.',
+  'forgot.code': 'الرمز المرسل على واتساب',
+  'forgot.resendCode': 'إرسال رمز جديد',
+  'forgot.changeNumber': 'تغيير الرقم',
+  'forgot.codeInvalid': 'أدخل الأرقام الستة الموجودة في رسالة واتساب.',
 
   'reset.title': 'اختر كلمة مرور جديدة',
   'reset.subtitle': 'فُتح رابط إعادة التعيين للبريد {email}.',

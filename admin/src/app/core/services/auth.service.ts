@@ -15,6 +15,8 @@ import {
   ChangePasswordRequest,
   ConfirmEmailRequest,
   ForgotPasswordRequest,
+  ForgotPasswordByPhoneRequest,
+  ResetPasswordByPhoneRequest,
   LoginRequest,
   RefreshTokenRequest,
   ResendConfirmationRequest,
@@ -84,6 +86,20 @@ export class AuthService {
   forgotPassword(request: ForgotPasswordRequest): Observable<void> {
     return this.http
       .post<Result<unknown>>(`${API_BASE_URL}/api/auth/forgot-password`, request)
+      .pipe(map(() => undefined));
+  }
+
+  /** Anonymous. Sends a 6-digit reset code by WhatsApp; always succeeds unless rate-limited. */
+  forgotPasswordByPhone(request: ForgotPasswordByPhoneRequest): Observable<void> {
+    return this.http
+      .post<Result<unknown>>(`${API_BASE_URL}/api/auth/forgot-password/phone`, request)
+      .pipe(map(() => undefined));
+  }
+
+  /** Anonymous. Completes a phone reset with the WhatsApp code. */
+  resetPasswordByPhone(request: ResetPasswordByPhoneRequest): Observable<void> {
+    return this.http
+      .post<Result<unknown>>(`${API_BASE_URL}/api/auth/reset-password/phone`, request)
       .pipe(map(() => undefined));
   }
 

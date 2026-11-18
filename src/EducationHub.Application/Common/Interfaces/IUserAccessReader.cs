@@ -59,4 +59,14 @@ public interface IUserAccessReader
     Task<IReadOnlyDictionary<Guid, int>> GetUserCountsByRoleIdsAsync(
         IReadOnlyCollection<Guid> roleIds,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Active accounts of <paramref name="tenantId"/> whose roles grant <paramref name="permission"/>.
+    /// The tenant is explicit (no tenant filter is involved) so anonymous flows such as the public
+    /// pre-registration form can notify the centre's staff.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> GetActiveUserIdsWithPermissionAsync(
+        Guid tenantId,
+        string permission,
+        CancellationToken cancellationToken = default);
 }

@@ -100,3 +100,46 @@ public sealed class StudentGuardianConfiguration : IEntityTypeConfiguration<Stud
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+/// <summary>Pre-registration requests from the public form.</summary>
+public sealed class RegistrationRequestConfiguration : IEntityTypeConfiguration<RegistrationRequest>
+{
+    public void Configure(EntityTypeBuilder<RegistrationRequest> builder)
+    {
+        builder.ToTable("RegistrationRequests");
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.GuardianName).HasMaxLength(200).IsRequired();
+        builder.Property(r => r.GuardianPhone).HasMaxLength(30).IsRequired();
+        builder.Property(r => r.GuardianEmail).HasMaxLength(256);
+        builder.Property(r => r.StudentName).HasMaxLength(200).IsRequired();
+        builder.Property(r => r.School).HasMaxLength(200);
+        builder.Property(r => r.PreferredSubjects).HasMaxLength(500);
+        builder.Property(r => r.Notes).HasMaxLength(1000);
+        builder.Property(r => r.RejectionReason).HasMaxLength(500);
+        builder.Property(r => r.SourceIp).HasMaxLength(64);
+        builder.Property(r => r.RowVersion).IsRowVersion();
+
+        // The staff list filters by status; the public form checks pending duplicates by phone.
+        builder.HasIndex(r => new { r.TenantId, r.Status, r.CreatedAt })
+            .HasDatabaseName("IX_RegistrationRequests_TenantId_Status_CreatedAt");
+
+        builder.HasIndex(r => new { r.TenantId, r.GuardianPhone })
+            .HasDatabaseName("IX_RegistrationRequests_TenantId_GuardianPhone");
+
+        // One pending request per student and mobile number. The handler checks first; the index
+        // turns a race between two identical submissions into a 409 instead of a duplicate.
+        builder.HasIndex(r => new { r.TenantId, r.GuardianPhone, r.StudentName }).IsUnique()
+            .HasDatabaseName("IX_RegistrationRequests_Pending_Unique")
+            .HasFilter("[Status] = 0 AND [IsDeleted] = 0");
+
+        builder.HasOne<EducationHub.Domain.Entities.Academic.GradeLevel>()
+            .WithMany()
+            .HasForeignKey(r => r.GradeLevelId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<StudentProfile>()
+            .WithMany()
+            .HasForeignKey(r => r.CreatedStudentProfileId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

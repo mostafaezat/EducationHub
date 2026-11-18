@@ -36,6 +36,44 @@ public sealed class AuthenticationRepository(EducationHubDbContext context) : IA
             cancellationToken);
     }
 
+    public async Task<AuthenticationSnapshot?> GetByPhoneAsync(
+        IReadOnlyList<string> phoneVariants,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(phoneVariants);
+
+        if (phoneVariants.Count == 0)
+        {
+            return null;
+        }
+
+        var variants = phoneVariants.ToArray();
+
+        // No tenant is known before sign-in, so both lookups ignore the query filters; the
+        // match itself (a number typed by the account owner) is what scopes the result.
+        var fromUsers = await context.Users
+            .IgnoreQueryFilters()
+            .Where(u => u.PhoneNumber != null && variants.Contains(u.PhoneNumber))
+            .Select(static u => u.Id)
+            .Take(2)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var fromParents = await context.ParentProfiles
+            .IgnoreQueryFilters()
+            .Where(p => !p.IsDeleted && p.UserId != null && p.PhoneNumber != null && variants.Contains(p.PhoneNumber))
+            .Select(static p => p.UserId!.Value)
+            .Take(2)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var matches = fromUsers.Concat(fromParents).Distinct().ToList();
+
+        return matches.Count == 1
+            ? await GetByIdAsync(matches[0], cancellationToken).ConfigureAwait(false)
+            : null;
+    }
+
     public Task<AuthenticationSnapshot?> GetByIdAsync(Guid userId, CancellationToken cancellationToken = default)
         => LoadSnapshotAsync(
             context.Users.IgnoreQueryFilters().Where(u => u.Id == userId),

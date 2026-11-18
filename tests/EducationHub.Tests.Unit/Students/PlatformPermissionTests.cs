@@ -44,6 +44,17 @@ public sealed class PlatformPermissionTests
     }
 
     [Fact]
+    public void Tenant_permissions_never_include_the_platform_only_areas()
+    {
+        var tenant = PermissionConstants.GetTenantPermissions();
+
+        Assert.DoesNotContain(tenant, p => p.StartsWith("Platform.", StringComparison.Ordinal) || p.StartsWith("Tenants.", StringComparison.Ordinal));
+        Assert.Contains(PermissionConstants.StudentsCreate, tenant);
+        Assert.Contains(PermissionConstants.RolesAssignPermissions, tenant);
+        Assert.All(PermissionConstants.PlatformOnlyAreaNames, area => Assert.True(PermissionConstants.Areas.ContainsKey(area), area));
+    }
+
+    [Fact]
     public void Every_platform_area_exists_in_the_catalog()
     {
         Assert.All(PermissionConstants.PlatformAreaNames, area => Assert.True(PermissionConstants.Areas.ContainsKey(area), area));

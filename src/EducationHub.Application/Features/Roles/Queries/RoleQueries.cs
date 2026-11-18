@@ -12,7 +12,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace EducationHub.Application.Features.Roles.Queries;
 
-/// <summary>Pages the current tenant's roles.</summary>
+/// <summary>
+/// Pages the current tenant's roles; for the platform administrator (no tenant) the
+/// platform-level roles, which are the only ones a platform user can hold.
+/// </summary>
 public sealed record GetRolesQuery(PaginationRequest Pagination, string? Search, bool ActiveOnly)
     : IRequest<Result<PaginatedList<RoleDto>>>;
 
@@ -28,9 +31,16 @@ public sealed class GetRolesQueryHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        RoleCommandSupport.RequireTenant(tenantContext);
+        // The platform scope sees every tenant's rows, so it is narrowed to the platform roles
+        // (TenantId = Guid.Empty) - exactly the set user creation under that scope accepts.
+        var query = tenantContext.IsPlatformScope
+            ? roleManager.Roles.Where(static r => r.TenantId == Guid.Empty)
+            : roleManager.Roles.Where(static r => r.TenantId != Guid.Empty);
 
-        var query = roleManager.Roles.Where(static r => r.TenantId != Guid.Empty);
+        if (!tenantContext.IsPlatformScope)
+        {
+            RoleCommandSupport.RequireTenant(tenantContext);
+        }
 
         if (request.ActiveOnly)
         {
@@ -120,7 +130,9 @@ public sealed class GetRoleQueryHandler(
 /// <remarks>
 /// Served from <see cref="PermissionConstants"/> rather than the database, so the editor can
 /// never offer a permission that authorization would then reject - and a permission added in
-/// code appears immediately, with no migration.
+/// code appears immediately, with no migration. The platform administrator sees the platform
+/// areas; a tenant sees every area except the platform-only ones (managing tenants, plans,
+/// platform settings), which no tenant role can hold.
 /// </remarks>
 public sealed record GetPermissionCatalogQuery : IRequest<Result<IReadOnlyList<PermissionAreaDto>>>;
 
@@ -133,11 +145,14 @@ public sealed class GetPermissionCatalogQueryHandler(ITenantContext tenantContex
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        RoleCommandSupport.RequireTenant(tenantContext);
+        var platform = tenantContext.IsPlatformScope;
 
         IReadOnlyList<PermissionAreaDto> areas =
         [
             .. PermissionConstants.Areas
+                .Where(a => platform
+                    ? PermissionConstants.PlatformAreaNames.Contains(a.Key)
+                    : !PermissionConstants.PlatformOnlyAreaNames.Contains(a.Key))
                 .OrderBy(static a => a.Key, StringComparer.Ordinal)
                 .Select(area => new PermissionAreaDto(area.Key, area.Value))
         ];

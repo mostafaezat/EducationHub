@@ -110,8 +110,11 @@ public sealed class RoleSeeder(
         {
             // Keep the same log-and-continue behaviour as always: seeding repairs what it
             // can and reports the rest rather than aborting startup on a bad role.
+            // Keeps a tenant's own adjustments to its system roles: a newer built-in
+            // definition (TenantRoleProvisioner.DefaultsVersion) only ADDS the permissions
+            // introduced since the role's stamp, once, and never removes anything.
             var result = await roleProvisioner
-                .EnsureRoleAsync(roleName, tenant, cancellationToken)
+                .EnsureRoleKeepingCustomizationsAsync(roleName, tenant, cancellationToken)
                 .ConfigureAwait(false);
 
             if (!result.Succeeded)

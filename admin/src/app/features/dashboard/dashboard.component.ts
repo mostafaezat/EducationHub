@@ -6,16 +6,18 @@ import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { catchError, forkJoin, map, Observable, of } from 'rxjs';
 import { TranslateService } from '../../core/i18n/translate.service';
-import { AuditSummaryDto, DashboardKpisDto } from '../../core/models';
+import { AuditSummaryDto, DashboardKpisDto, FamilyStudentOverviewDto } from '../../core/models';
+import { isFamilyOnly } from '../../core/nav';
 import { AcademicService } from '../../core/services/academic.service';
 import { AuditService } from '../../core/services/audit.service';
 import { AuthService } from '../../core/services/auth.service';
 import { BranchesService } from '../../core/services/branches.service';
+import { FamilyService } from '../../core/services/family.service';
 import { FinanceService } from '../../core/services/finance.service';
 import { RolesService } from '../../core/services/roles.service';
 import { TenantsService } from '../../core/services/tenants.service';
 import { UsersService } from '../../core/services/users.service';
-import { money } from '../shared/ops-utils';
+import { money, shortTime } from '../shared/ops-utils';
 
 interface StatCard {
   label: string;
@@ -39,6 +41,44 @@ interface StatDefinition {
         <div class="subtitle">{{ t(partOfDay) }}</div>
       </div>
     </div>
+
+    @if (familyOnly) {
+      <div class="family-grid">
+        @for (child of family(); track child.studentProfileId) {
+          <a class="family-card" routerLink="/my-family">
+            <div class="family-head">
+              <i class="pi pi-user"></i>
+              <strong>{{ child.fullName }}</strong>
+            </div>
+            <div class="family-row">
+              <span>{{ t('family.attendanceRate') }}</span>
+              <strong>{{ child.attendance.attendanceRate !== null && child.attendance.attendanceRate !== undefined ? child.attendance.attendanceRate + '%' : '—' }}</strong>
+            </div>
+            <div class="family-row">
+              <span>{{ t('family.nextSession') }}</span>
+              @if (child.upcomingSessions[0]; as next) {
+                <strong>{{ next.session.date }} · {{ time(next.session.startTime) }}</strong>
+              } @else {
+                <strong>—</strong>
+              }
+            </div>
+            <div class="family-row">
+              <span>{{ t('family.pendingHomework') }}</span>
+              <strong>{{ pendingHomework(child) }}</strong>
+            </div>
+            <div class="family-row">
+              <span>{{ t('family.outstandingFees') }}</span>
+              <strong [class.warn-text]="(child.balance?.outstanding ?? 0) > 0">{{ money(child.balance?.outstanding) }}</strong>
+            </div>
+            <span class="family-link">{{ t('family.openDetails') }} <i class="pi pi-arrow-right"></i></span>
+          </a>
+        } @empty {
+          <div class="card">
+            <div class="state-panel"><i class="pi pi-users"></i>{{ t('family.empty') }}</div>
+          </div>
+        }
+      </div>
+    }
 
     @if (kpis(); as k) {
       <div class="kpi-grid">
@@ -247,6 +287,49 @@ interface StatDefinition {
       .profile-row > span:first-child {
         color: #64748b;
       }
+      .family-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+      }
+      .family-card {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+        background: #fff;
+        border: 1px solid #e3e8f0;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        color: inherit;
+        text-decoration: none;
+      }
+      .family-card:hover {
+        border-color: #2563eb;
+      }
+      .family-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.05rem;
+        margin-bottom: 0.25rem;
+      }
+      .family-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+      }
+      .family-row > span {
+        color: #64748b;
+      }
+      .warn-text {
+        color: #b45309;
+      }
+      .family-link {
+        margin-top: 0.35rem;
+        color: #2563eb;
+        font-size: 0.85rem;
+      }
     `
   ]
 })
@@ -261,12 +344,18 @@ export class DashboardComponent {
   private readonly academic = inject(AcademicService);
   private readonly audit = inject(AuditService);
   private readonly finance = inject(FinanceService);
+  private readonly familyService = inject(FamilyService);
 
   protected readonly user = this.auth.user;
   protected readonly stats = signal<StatCard[]>([]);
   protected readonly summary = signal<AuditSummaryDto[]>([]);
   protected readonly kpis = signal<DashboardKpisDto | null>(null);
   protected readonly money = money;
+  protected readonly time = shortTime;
+  protected readonly family = signal<FamilyStudentOverviewDto[]>([]);
+
+  /** Students and parents get their own children's summary instead of centre-wide figures. */
+  protected readonly familyOnly = isFamilyOnly(this.auth.roles());
   protected readonly canViewAudit = signal(this.auth.hasPermission('AuditLogs.View'));
 
   protected readonly partOfDay = (() => {
@@ -279,9 +368,25 @@ export class DashboardComponent {
   })();
 
   constructor() {
+    if (this.familyOnly) {
+      this.loadFamily();
+      return;
+    }
+
     this.loadKpis();
     this.loadStats();
     this.loadSummary();
+  }
+
+  protected pendingHomework(child: FamilyStudentOverviewDto): number {
+    return child.homework.filter((h) => h.status === 'Pending' || h.status === 'Missing').length;
+  }
+
+  private loadFamily(): void {
+    this.familyService
+      .overview()
+      .pipe(catchError(() => of<FamilyStudentOverviewDto[]>([])))
+      .subscribe((rows) => this.family.set(rows ?? []));
   }
 
   protected goAudit(): void {

@@ -10,8 +10,12 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     return next(req);
   }
 
+  // The public pre-registration page is anonymous by design: the centre comes from the URL,
+  // so a staff session open in the same browser (possibly of another centre) must not ride along.
   const isAuthEndpoint =
-    req.url.includes('/api/auth/login') || req.url.includes('/api/auth/refresh');
+    req.url.includes('/api/auth/login') ||
+    req.url.includes('/api/auth/refresh') ||
+    req.url.includes('/api/public/');
 
   if (isAuthEndpoint) {
     return next(req);

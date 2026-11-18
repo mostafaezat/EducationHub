@@ -28,3 +28,12 @@ public enum GuardianRelationship
 
     Other = 3
 }
+
+public enum RegistrationRequestStatus
+{
+    Pending = 0,
+
+    Approved = 1,
+
+    Rejected = 2
+}

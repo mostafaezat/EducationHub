@@ -82,7 +82,15 @@ public sealed class DemoOperationsSeedingTests(ApiTestFixture fixture)
         var items = settlement.GetProperty("items").EnumerateArray().ToList();
         Assert.NotEmpty(items);
         var teacherPayments = await ModuleTestHelpers.GetDataAsync(Client, $"/api/finance/teacher-payments?teacherProfileId={teacher.Id()}", token);
-        var settledTotal = items.Where(i => i.TryGetProperty("teacherPaymentId", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String).Sum(i => i.Dec("amount"));
+        // The settlement endpoint lists only what is still unpaid, so the settled rows are read
+        // from the database: every compensation tied to a payment must add up to the payments.
+        Assert.All(items, i => Assert.False(i.TryGetProperty("teacherPaymentId", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String));
+        var teacherId = teacher.Id();
+        decimal settledTotal = 0m;
+        await fixture.WithPlatformScopeAsync(async db =>
+            settledTotal = await db.SessionCompensations.IgnoreQueryFilters()
+                .Where(c => c.TeacherProfileId == teacherId && c.TeacherPaymentId != null)
+                .SumAsync(static c => (decimal?)c.Amount) ?? 0m);
         Assert.Equal(teacherPayments.GetProperty("items").EnumerateArray().Sum(p => p.Dec("amount")), settledTotal);
 
         // Learning.

@@ -1,4 +1,5 @@
 using EducationHub.Application.Common.Exceptions;
+using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Auth.DTOs;
 using EducationHub.Domain.Entities.Identity;
@@ -9,7 +10,7 @@ using Microsoft.AspNetCore.Identity;
 namespace EducationHub.Application.Features.Auth.Commands;
 
 /// <summary>
-/// Authenticates an email/password pair and issues a token pair.
+/// Authenticates an e-mail (or mobile number) and password pair and issues a token pair.
 /// </summary>
 public sealed record LoginCommand(LoginRequest Request) : IRequest<Result<AuthResponse>>;
 
@@ -28,11 +29,16 @@ public sealed class LoginCommandHandler(
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        var normalizedEmail = command.Request.Email.Trim().ToUpperInvariant();
+        // The identifier is an e-mail address or a mobile number (parents often have no e-mail).
+        var identifier = command.Request.Email.Trim();
 
-        var snapshot = await authentication
-            .GetByEmailAsync(normalizedEmail, cancellationToken)
-            .ConfigureAwait(false);
+        var snapshot = PhoneNumberFormat.LooksLikePhone(identifier)
+            ? await authentication
+                .GetByPhoneAsync(PhoneNumberFormat.LookupVariants(identifier), cancellationToken)
+                .ConfigureAwait(false)
+            : await authentication
+                .GetByEmailAsync(identifier.ToUpperInvariant(), cancellationToken)
+                .ConfigureAwait(false);
 
         if (snapshot is null)
         {

@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Extensions;
 using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Interfaces;
@@ -27,14 +28,21 @@ public sealed record GetStudyGroupsQuery(
     Guid? TeacherProfileId,
     bool ActiveOnly) : IRequest<Result<PaginatedList<StudyGroupDto>>>;
 
-public sealed class GetStudyGroupsQueryHandler(IRepository<StudyGroup> groups, SchedulingReadModel readModel)
+public sealed class GetStudyGroupsQueryHandler(IRepository<StudyGroup> groups, SchedulingReadModel readModel, DataScopeService dataScope)
     : IRequestHandler<GetStudyGroupsQuery, Result<PaginatedList<StudyGroupDto>>>
 {
     public async Task<Result<PaginatedList<StudyGroupDto>>> Handle(GetStudyGroupsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = groups.Query;
+
+        if (!scope.IsUnrestricted)
+        {
+            var visible = scope.GroupIds.ToArray();
+            query = query.Where(g => visible.Contains(g.Id));
+        }
 
         if (request.SubjectId.HasValue)
         {
@@ -72,14 +80,17 @@ public sealed class GetStudyGroupsQueryHandler(IRepository<StudyGroup> groups, S
 
 public sealed record GetStudyGroupQuery(Guid Id) : IRequest<Result<StudyGroupDto>>;
 
-public sealed class GetStudyGroupQueryHandler(IRepository<StudyGroup> groups, SchedulingReadModel readModel)
+public sealed class GetStudyGroupQueryHandler(IRepository<StudyGroup> groups, SchedulingReadModel readModel, DataScopeService dataScope)
     : IRequestHandler<GetStudyGroupQuery, Result<StudyGroupDto>>
 {
     public async Task<Result<StudyGroupDto>> Handle(GetStudyGroupQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var group = await groups.GetByIdAsync(request.Id, cancellationToken).ConfigureAwait(false);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+        var group = scope.CanSeeGroup(request.Id)
+            ? await groups.GetByIdAsync(request.Id, cancellationToken).ConfigureAwait(false)
+            : null;
 
         return group is null
             ? Result<StudyGroupDto>.Failure("Groups.NotFound", "Study group not found.")
@@ -92,19 +103,30 @@ public sealed record GetEnrollmentsQuery(Guid StudyGroupId, bool ActiveOnly) : I
 public sealed class GetEnrollmentsQueryHandler(
     IRepository<StudyGroup> groups,
     IRepository<Enrollment> enrollments,
-    SchedulingReadModel readModel)
+    SchedulingReadModel readModel,
+    DataScopeService dataScope)
     : IRequestHandler<GetEnrollmentsQuery, Result<IReadOnlyList<EnrollmentDto>>>
 {
     public async Task<Result<IReadOnlyList<EnrollmentDto>>> Handle(GetEnrollmentsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!await groups.ExistsAsync(request.StudyGroupId, cancellationToken).ConfigureAwait(false))
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!scope.CanSeeGroup(request.StudyGroupId)
+            || !await groups.ExistsAsync(request.StudyGroupId, cancellationToken).ConfigureAwait(false))
         {
             return Result<IReadOnlyList<EnrollmentDto>>.Failure("Groups.NotFound", "Study group not found.");
         }
 
         var query = enrollments.Query.Where(e => e.StudyGroupId == request.StudyGroupId);
+
+        // A family sees its own children on the roster, never the other students.
+        if (scope.IsFamily)
+        {
+            var own = scope.StudentIds.ToArray();
+            query = query.Where(e => own.Contains(e.StudentProfileId));
+        }
 
         if (request.ActiveOnly)
         {
@@ -124,22 +146,34 @@ public sealed record GetStudentEnrollmentsQuery(Guid StudentProfileId) : IReques
 public sealed class GetStudentEnrollmentsQueryHandler(
     IRepository<Enrollment> enrollments,
     IRepository<StudentProfile> students,
-    SchedulingReadModel readModel)
+    SchedulingReadModel readModel,
+    DataScopeService dataScope)
     : IRequestHandler<GetStudentEnrollmentsQuery, Result<IReadOnlyList<EnrollmentDto>>>
 {
     public async Task<Result<IReadOnlyList<EnrollmentDto>>> Handle(GetStudentEnrollmentsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // Another tenant's (or a deleted) student answers 404, like every other student route,
-        // instead of an empty list that would confirm nothing but still differ in shape.
-        if (!await students.ExistsAsync(request.StudentProfileId, cancellationToken).ConfigureAwait(false))
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        // Another tenant's (or a deleted, or an out-of-scope) student answers 404, like every
+        // other student route, instead of an empty list that would still differ in shape.
+        if (!scope.CanSeeStudent(request.StudentProfileId)
+            || !await students.ExistsAsync(request.StudentProfileId, cancellationToken).ConfigureAwait(false))
         {
             return Result<IReadOnlyList<EnrollmentDto>>.Failure("Students.NotFound", "Student not found.");
         }
 
-        var rows = await enrollments.Query
-            .Where(e => e.StudentProfileId == request.StudentProfileId)
+        var query = enrollments.Query.Where(e => e.StudentProfileId == request.StudentProfileId);
+
+        // A teacher sees the student's place in their own groups only.
+        if (scope.IsTeacher)
+        {
+            var visible = scope.GroupIds.ToArray();
+            query = query.Where(e => visible.Contains(e.StudyGroupId));
+        }
+
+        var rows = await query
             .OrderByDescending(static e => e.EnrolledOn)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -416,66 +450,14 @@ public sealed class EnrollStudentCommandHandler(
         ArgumentNullException.ThrowIfNull(command);
 
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
-        var group = await groups.GetByIdAsync(command.StudyGroupId, cancellationToken).ConfigureAwait(false);
 
-        if (group is null)
-        {
-            return Result<EnrollmentDto>.Failure("Groups.NotFound", "Study group not found.");
-        }
-
-        if (!group.IsActive)
-        {
-            return Result<EnrollmentDto>.Failure("Groups.Inactive", "The study group is inactive.");
-        }
-
-        var studentId = command.Request.StudentProfileId;
-
-        if (!await students.ExistsAsync(studentId, cancellationToken).ConfigureAwait(false))
-        {
-            return Result<EnrollmentDto>.Failure("Students.NotFound", "Student not found.");
-        }
-
-        var existing = await enrollments.Query
-            .FirstOrDefaultAsync(e => e.StudyGroupId == group.Id && e.StudentProfileId == studentId, cancellationToken)
+        var enrolled = await EnrollmentSupport.EnrollAsync(
+                groups, students, enrollments, clock, tenantId, command.StudyGroupId, command.Request.StudentProfileId, command.Request.EnrolledOn, cancellationToken)
             .ConfigureAwait(false);
 
-        if (existing is { Status: EnrollmentStatus.Active })
+        if (!enrolled.Succeeded || enrolled.Data is not { } existing)
         {
-            return Result<EnrollmentDto>.Failure("Enrollments.AlreadyExists", "The student is already enrolled in this group.");
-        }
-
-        if (group.Capacity is { } capacity)
-        {
-            var active = await enrollments.Query
-                .CountAsync(e => e.StudyGroupId == group.Id && e.Status == EnrollmentStatus.Active, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (active >= capacity)
-            {
-                return Result<EnrollmentDto>.Failure("Groups.Full", "The study group is at capacity.");
-            }
-        }
-
-        var enrolledOn = command.Request.EnrolledOn ?? DateOnly.FromDateTime(clock.UtcNow);
-
-        if (existing is not null)
-        {
-            existing.Status = EnrollmentStatus.Active;
-            existing.EnrolledOn = enrolledOn;
-            existing.EndedOn = null;
-        }
-        else
-        {
-            existing = new Enrollment
-            {
-                TenantId = tenantId,
-                StudyGroupId = group.Id,
-                StudentProfileId = studentId,
-                EnrolledOn = enrolledOn,
-                Status = EnrollmentStatus.Active
-            };
-
-            await enrollments.AddAsync(existing, cancellationToken).ConfigureAwait(false);
+            return Result<EnrollmentDto>.FromFailure(enrolled);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -647,5 +629,87 @@ public sealed class CreateScheduleSlotCommandValidator : LocalizedValidator<Crea
             .WithMessage("The effective range must end on or after its start.")
             .When(static x => x.Request is not null);
         RuleFor(x => x.Request.Room).MaximumLength(100).When(static x => x.Request is not null);
+    }
+}
+
+/// <summary>
+/// The enrollment rules (group active, student exists, not already enrolled, capacity), shared by
+/// <see cref="EnrollStudentCommandHandler"/> and the approval of a pre-registration request.
+/// Adds or reactivates the row without saving.
+/// </summary>
+internal static class EnrollmentSupport
+{
+    public static async Task<Result<Enrollment>> EnrollAsync(
+        IRepository<StudyGroup> groups,
+        IRepository<StudentProfile> students,
+        IRepository<Enrollment> enrollments,
+        IDateTimeService clock,
+        Guid tenantId,
+        Guid groupId,
+        Guid studentId,
+        DateOnly? requestedOn,
+        CancellationToken cancellationToken)
+    {
+        var group = await groups.GetByIdAsync(groupId, cancellationToken).ConfigureAwait(false);
+
+        if (group is null)
+        {
+            return Result<Enrollment>.Failure("Groups.NotFound", "Study group not found.");
+        }
+
+        if (!group.IsActive)
+        {
+            return Result<Enrollment>.Failure("Groups.Inactive", "The study group is inactive.");
+        }
+
+        if (!await students.ExistsAsync(studentId, cancellationToken).ConfigureAwait(false))
+        {
+            return Result<Enrollment>.Failure("Students.NotFound", "Student not found.");
+        }
+
+        var existing = await enrollments.Query
+            .FirstOrDefaultAsync(e => e.StudyGroupId == group.Id && e.StudentProfileId == studentId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is { Status: EnrollmentStatus.Active })
+        {
+            return Result<Enrollment>.Failure("Enrollments.AlreadyExists", "The student is already enrolled in this group.");
+        }
+
+        if (group.Capacity is { } capacity)
+        {
+            var active = await enrollments.Query
+                .CountAsync(e => e.StudyGroupId == group.Id && e.Status == EnrollmentStatus.Active, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (active >= capacity)
+            {
+                return Result<Enrollment>.Failure("Groups.Full", "The study group is at capacity.");
+            }
+        }
+
+        var enrolledOn = requestedOn ?? DateOnly.FromDateTime(clock.UtcNow);
+
+        if (existing is not null)
+        {
+            existing.Status = EnrollmentStatus.Active;
+            existing.EnrolledOn = enrolledOn;
+            existing.EndedOn = null;
+        }
+        else
+        {
+            existing = new Enrollment
+            {
+                TenantId = tenantId,
+                StudyGroupId = group.Id,
+                StudentProfileId = studentId,
+                EnrolledOn = enrolledOn,
+                Status = EnrollmentStatus.Active
+            };
+
+            await enrollments.AddAsync(existing, cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result<Enrollment>.Success(existing);
     }
 }

@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Validation;
 using EducationHub.Application.Features.Auth.Commands;
 using EducationHub.Application.Features.Auth.DTOs;
@@ -110,5 +111,50 @@ public sealed class ResendConfirmationCommandValidator : LocalizedValidator<Rese
     {
         RuleFor(x => x.Request).NotNull().WithMessage(_ => Message(LocalizationKeys.RequestBodyRequired, "The request body is required."));
         RuleFor(x => x.Request).SetValidator(new ResendConfirmationRequestValidator(localizer));
+    }
+}
+
+public sealed class ForgotPasswordByPhoneCommandValidator : LocalizedValidator<ForgotPasswordByPhoneCommand>
+{
+    public ForgotPasswordByPhoneCommandValidator(IStringLocalizer<LocalizationResource>? localizer = null)
+        : base(localizer)
+    {
+        RuleFor(x => x.Request).NotNull().WithMessage(_ => Message(LocalizationKeys.RequestBodyRequired, "The request body is required."));
+
+        When(x => x.Request is not null, () =>
+            RuleFor(x => x.Request.Phone)
+                .NotEmpty().WithMessage(_ => Message(LocalizationKeys.PhoneRequired, "A mobile number is required."))
+                .MaximumLength(32).WithMessage(_ => Message(LocalizationKeys.PhoneInvalid, "Enter a valid mobile number."))
+                .Must(PhoneNumberFormat.LooksLikePhone).WithMessage(_ => Message(LocalizationKeys.PhoneInvalid, "Enter a valid mobile number.")));
+    }
+}
+
+public sealed class ResetPasswordByPhoneCommandValidator : LocalizedValidator<ResetPasswordByPhoneCommand>
+{
+    public ResetPasswordByPhoneCommandValidator(IStringLocalizer<LocalizationResource>? localizer = null)
+        : base(localizer)
+    {
+        RuleFor(x => x.Request).NotNull().WithMessage(_ => Message(LocalizationKeys.RequestBodyRequired, "The request body is required."));
+
+        When(x => x.Request is not null, () =>
+        {
+            RuleFor(x => x.Request.Phone)
+                .NotEmpty().WithMessage(_ => Message(LocalizationKeys.PhoneRequired, "A mobile number is required."))
+                .MaximumLength(32).WithMessage(_ => Message(LocalizationKeys.PhoneInvalid, "Enter a valid mobile number."))
+                .Must(PhoneNumberFormat.LooksLikePhone).WithMessage(_ => Message(LocalizationKeys.PhoneInvalid, "Enter a valid mobile number."));
+
+            RuleFor(x => x.Request.Code)
+                .NotEmpty().WithMessage(_ => Message(LocalizationKeys.ResetCodeRequired, "The code is required."))
+                .Matches(@"^\s*[0-9]{6}\s*$").WithMessage(_ => Message(LocalizationKeys.ResetCodeFormat, "The code is the 6 digits sent by WhatsApp."));
+
+            RuleFor(x => x.Request.NewPassword)
+                .NotEmpty().WithMessage(_ => Message(LocalizationKeys.NewPasswordRequiredSimple, "A new password is required."))
+                .MinimumLength(8).WithMessage(_ => Message(LocalizationKeys.PasswordMinLengthSimple, "The password must be at least 8 characters."))
+                .Must(p => p is not null && p.Any(char.IsDigit)).WithMessage(_ => Message(LocalizationKeys.PasswordDigitSimple, "The password must contain a digit."))
+                .Must(p => p is not null && p.Any(char.IsLower)).WithMessage(_ => Message(LocalizationKeys.PasswordLowerSimple, "The password must contain a lowercase letter."));
+
+            RuleFor(x => x.Request.ConfirmPassword)
+                .Equal(x => x.Request.NewPassword).WithMessage(_ => Message(LocalizationKeys.PasswordMismatchSimple, "The passwords do not match."));
+        });
     }
 }

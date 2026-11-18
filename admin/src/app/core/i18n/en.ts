@@ -15,6 +15,8 @@ import { EN_TENANTS } from './parts/en/tenants';
 import { EN_STUDENTS } from './parts/en/students';
 import { EN_TEACHERS } from './parts/en/teachers';
 import { EN_USERS } from './parts/en/users';
+import { EN_FAMILY } from './parts/en/family';
+import { EN_REGISTRATION } from './parts/en/registration';
 
 /** English catalog. Keys are merged from the per-domain parts; later spreads win. */
 export const EN: Record<string, string> = {
@@ -34,5 +36,7 @@ export const EN: Record<string, string> = {
   ...EN_TEACHERS,
   ...EN_STUDENTS,
   ...EN_AUDIT,
-  ...EN_OPERATIONS
+  ...EN_OPERATIONS,
+  ...EN_FAMILY,
+  ...EN_REGISTRATION
 };

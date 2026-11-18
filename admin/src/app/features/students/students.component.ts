@@ -17,6 +17,7 @@ import {
   CreateStudentRequest,
   GUARDIAN_RELATIONSHIPS,
   GuardianRelationship,
+  NewGuardianAccountDto,
   STUDENT_STATUSES,
   StudentDto,
   StudentStatus
@@ -265,11 +266,84 @@ type AccountMode = 'none' | 'new';
             <small class="muted">{{ t('students.account.hint') }}</small>
           }
         </div>
+
+        @if (canCreateParent()) {
+          <div class="guardian-box">
+            <label class="check-line">
+              <p-checkbox [binary]="true" [ngModel]="withGuardian()" (ngModelChange)="withGuardian.set($event)" />
+              <span>{{ t('students.newGuardian.toggle') }}</span>
+            </label>
+            @if (withGuardian()) {
+              <form [formGroup]="guardianForm" class="form-grid">
+                <div class="field">
+                  <label>{{ t('students.newGuardian.fullName') }} *</label>
+                  <input pInputText formControlName="fullName" />
+                </div>
+                <div class="field">
+                  <label>{{ t('students.newGuardian.relationship') }}</label>
+                  <p-select
+                    [options]="relationshipOptions()"
+                    formControlName="relationship"
+                    optionLabel="label"
+                    optionValue="value"
+                    styleClass="w-full"
+                  />
+                </div>
+                <div class="field">
+                  <label>{{ t('students.newGuardian.phone') }}</label>
+                  <input pInputText formControlName="phoneNumber" />
+                </div>
+                <div class="field">
+                  <label>{{ t('students.newGuardian.email') }}</label>
+                  <input pInputText type="email" formControlName="email" />
+                </div>
+              </form>
+              <label class="check-line">
+                <p-checkbox [binary]="true" [formControl]="guardianForm.controls.createAccount" />
+                <span>{{ t('students.newGuardian.createAccount') }}</span>
+              </label>
+              <small class="muted">{{ t('students.newGuardian.hint') }}</small>
+            }
+          </div>
+        }
       }
 
       <ng-template pTemplate="footer">
         <p-button [label]="t('common.cancel')" severity="secondary" [text]="true" (onClick)="dialogVisible.set(false)" />
         <p-button [label]="t('common.save')" icon="pi pi-check" [loading]="saving()" (onClick)="save()" />
+      </ng-template>
+    </p-dialog>
+
+    <p-dialog
+      [visible]="credentials() !== null"
+      (visibleChange)="!$event && credentials.set(null)"
+      [modal]="true"
+      [header]="t('students.newGuardian.resultTitle')"
+      [style]="{ width: '30rem' }"
+    >
+      @if (credentials(); as c) {
+        @if (c.accountCreated && c.temporaryPassword) {
+          <p>{{ t('students.newGuardian.resultBody', { name: c.fullName }) }}</p>
+          <div class="credential-row"><span>{{ t('students.newGuardian.loginName') }}</span><strong>{{ c.loginName }}</strong></div>
+          <div class="credential-row">
+            <span>{{ t('students.newGuardian.temporaryPassword') }}</span>
+            <strong class="mono">{{ c.temporaryPassword }}</strong>
+          </div>
+          <small class="muted">{{ t('students.newGuardian.resultHint') }}</small>
+          @if (c.whatsAppSent) {
+            <p class="whatsapp-note"><i class="pi pi-whatsapp"></i> {{ t('students.newGuardian.whatsAppSent', { phone: c.phoneNumber ?? '' }) }}</p>
+          }
+        } @else if (c.linkedExistingParent) {
+          <p>{{ t('students.newGuardian.linkedExisting', { name: c.fullName }) }}</p>
+        } @else {
+          <p>{{ t('students.newGuardian.createdNoAccount', { name: c.fullName }) }}</p>
+        }
+      }
+      <ng-template pTemplate="footer">
+        @if (credentials()?.temporaryPassword) {
+          <p-button [label]="t('students.newGuardian.copy')" icon="pi pi-copy" [text]="true" (onClick)="copyCredentials()" />
+        }
+        <p-button [label]="t('common.close')" (onClick)="credentials.set(null)" />
       </ng-template>
     </p-dialog>
 
@@ -329,6 +403,33 @@ type AccountMode = 'none' | 'new';
         display: flex;
         gap: 0.5rem;
         margin: 0.75rem 0;
+      }
+      .guardian-box {
+        border-top: 1px solid #e3e8f0;
+        margin-top: 1rem;
+        padding-top: 0.75rem;
+      }
+      .check-line {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.5rem 0;
+        cursor: pointer;
+      }
+      .credential-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.4rem 0;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .whatsapp-note {
+        color: #15803d;
+        font-size: 0.85rem;
+        margin: 0.75rem 0 0;
+      }
+      .mono {
+        font-family: ui-monospace, monospace;
+        letter-spacing: 0.05em;
       }
       .field-error {
         color: #dc2626;
@@ -428,6 +529,19 @@ export class StudentsComponent implements OnInit {
     password: ['', [Validators.required, Validators.minLength(8)]]
   });
 
+  /** Optional guardian registered in the same step as the student (needs Parents.Create). */
+  protected readonly canCreateParent = signal(this.auth.hasPermission('Parents.Create'));
+  protected readonly withGuardian = signal(false);
+  protected readonly credentials = signal<NewGuardianAccountDto | null>(null);
+
+  protected readonly guardianForm = this.fb.nonNullable.group({
+    fullName: ['', [Validators.required, Validators.minLength(3)]],
+    relationship: ['Father' as GuardianRelationship],
+    phoneNumber: [''],
+    email: ['', [Validators.email]],
+    createAccount: [true]
+  });
+
   private lookupsLoaded = false;
 
   ngOnInit(): void {
@@ -496,6 +610,8 @@ export class StudentsComponent implements OnInit {
       notes: ''
     });
     this.accountForm.reset({ email: '', password: '' });
+    this.withGuardian.set(false);
+    this.guardianForm.reset({ fullName: '', relationship: 'Father', phoneNumber: '', email: '', createAccount: true });
     this.dialogVisible.set(true);
   }
 
@@ -516,11 +632,18 @@ export class StudentsComponent implements OnInit {
 
   protected save(): void {
     const withAccount = !this.editing() && this.accountMode() === 'new';
+    const withGuardian = !this.editing() && this.canCreateParent() && this.withGuardian();
+    const guardian = this.guardianForm.getRawValue();
+    const missingContact = guardian.createAccount && !guardian.email.trim() && !guardian.phoneNumber.trim();
+    const guardianInvalid = withGuardian && (this.guardianForm.invalid || missingContact);
 
-    if (this.form.invalid || (withAccount && this.accountForm.invalid)) {
+    if (this.form.invalid || (withAccount && this.accountForm.invalid) || guardianInvalid) {
       this.form.markAllAsTouched();
       this.accountForm.markAllAsTouched();
-      this.notifications.error(this.t('students.formIncomplete'));
+      this.guardianForm.markAllAsTouched();
+      this.notifications.error(
+        this.t(guardianInvalid && missingContact ? 'students.newGuardian.emailRequired' : 'students.formIncomplete')
+      );
       return;
     }
 
@@ -539,14 +662,18 @@ export class StudentsComponent implements OnInit {
           enrollmentDate: toDateOnly(value.enrollmentDate),
           notes: value.notes
         })
-      : this.service.create(this.buildCreateRequest(withAccount));
+      : this.service.create(this.buildCreateRequest(withAccount, withGuardian));
 
     this.saving.set(true);
     request$.pipe(finalize(() => this.saving.set(false))).subscribe({
-      next: () => {
+      next: (saved) => {
         this.notifications.success(this.t(editing ? 'students.updated' : 'students.created'));
         this.dialogVisible.set(false);
         this.load();
+
+        if (!editing && saved?.newGuardian) {
+          this.credentials.set(saved.newGuardian);
+        }
       }
     });
   }
@@ -637,9 +764,21 @@ export class StudentsComponent implements OnInit {
       });
   }
 
-  private buildCreateRequest(withAccount: boolean): CreateStudentRequest {
+  protected copyCredentials(): void {
+    const c = this.credentials();
+
+    if (!c?.temporaryPassword) {
+      return;
+    }
+
+    const text = `${this.t('students.newGuardian.loginName')}: ${c.loginName ?? ''}\n${this.t('students.newGuardian.temporaryPassword')}: ${c.temporaryPassword}`;
+    void navigator.clipboard?.writeText(text).then(() => this.notifications.success(this.t('students.newGuardian.copied')));
+  }
+
+  private buildCreateRequest(withAccount: boolean, withGuardian: boolean): CreateStudentRequest {
     const value = this.form.getRawValue();
     const account = this.accountForm.getRawValue();
+    const guardian = this.guardianForm.getRawValue();
 
     return {
       fullName: value.fullName,
@@ -651,7 +790,16 @@ export class StudentsComponent implements OnInit {
       notes: value.notes || null,
       userId: null,
       accountEmail: withAccount ? account.email : null,
-      accountPassword: withAccount ? account.password : null
+      accountPassword: withAccount ? account.password : null,
+      guardian: withGuardian
+        ? {
+            fullName: guardian.fullName,
+            phoneNumber: guardian.phoneNumber.trim() || null,
+            email: guardian.email.trim() || null,
+            relationship: guardian.relationship,
+            createAccount: guardian.createAccount
+          }
+        : null
     };
   }
 

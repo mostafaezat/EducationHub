@@ -1,8 +1,11 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Helpers;
+using EducationHub.Application.Common.Messaging;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Common.Validation;
 using EducationHub.Application.Features.Scheduling;
 using EducationHub.Application.Features.Tenancy.Commands;
+using EducationHub.Domain.Entities.Files;
 using EducationHub.Domain.Entities.Learning;
 using EducationHub.Domain.Entities.Scheduling;
 using EducationHub.Domain.Entities.Students;
@@ -23,7 +26,11 @@ public sealed record HomeworkDto(
     decimal? MaxGrade, int Submitted, int Graded, int RosterSize);
 
 public sealed record SubmissionRowDto(
-    Guid StudentProfileId, string StudentName, SubmissionStatus Status, DateTime? SubmittedAt, decimal? Grade, string? Feedback);
+    Guid StudentProfileId, string StudentName, SubmissionStatus Status, DateTime? SubmittedAt, decimal? Grade, string? Feedback,
+    IReadOnlyList<SubmissionFileDto> Files);
+
+/// <summary>A file a student (or their parent) uploaded as the answer to a homework item.</summary>
+public sealed record SubmissionFileDto(Guid Id, string FileName, string ContentType, long SizeInBytes, string? Note, DateTime UploadedAt);
 
 public sealed record CreateHomeworkRequest(Guid StudyGroupId, string? Title, string? Description, DateOnly? AssignedOn, DateOnly DueDate, decimal? MaxGrade);
 
@@ -116,6 +123,44 @@ internal static class LearningSupport
 
 internal sealed record RosterEntry(Guid Id, string FullName);
 
+/// <summary>
+/// Homework answers are stored files owned by the submission row
+/// (<c>OwnerEntityName = HomeworkSubmission</c>, <c>OwnerEntityId = submission id</c>).
+/// </summary>
+public static class HomeworkFiles
+{
+    public const string OwnerName = "HomeworkSubmission";
+
+    /// <summary>The files of each submission, newest first.</summary>
+    public static async Task<Dictionary<Guid, List<SubmissionFileDto>>> BySubmissionAsync(
+        IRepository<StoredFile> files,
+        IReadOnlyCollection<Guid> submissionIds,
+        CancellationToken ct)
+    {
+        if (submissionIds.Count == 0)
+        {
+            return new Dictionary<Guid, List<SubmissionFileDto>>();
+        }
+
+        var ids = submissionIds.ToArray();
+
+        var rows = await files.Query
+            .Where(f => f.OwnerEntityName == OwnerName && f.OwnerEntityId != null && ids.Contains(f.OwnerEntityId.Value))
+            .OrderByDescending(static f => f.CreatedAt)
+            .Select(static f => new
+            {
+                SubmissionId = f.OwnerEntityId!.Value,
+                File = new SubmissionFileDto(f.Id, f.OriginalFileName, f.ContentType, f.SizeInBytes, f.Description, f.CreatedAt)
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(static r => r.SubmissionId)
+            .ToDictionary(static g => g.Key, static g => g.Select(static r => r.File).ToList());
+    }
+}
+
 // ---- Homework ----------------------------------------------------------------
 
 public sealed record GetHomeworkListQuery(Guid? StudyGroupId, DateOnly? DueFrom, DateOnly? DueTo) : IRequest<Result<IReadOnlyList<HomeworkDto>>>;
@@ -124,13 +169,21 @@ public sealed class GetHomeworkListQueryHandler(
     IRepository<Homework> homework,
     IRepository<HomeworkSubmission> submissions,
     IRepository<Enrollment> enrollments,
-    SchedulingReadModel scheduling)
+    SchedulingReadModel scheduling,
+    DataScopeService dataScope)
     : IRequestHandler<GetHomeworkListQuery, Result<IReadOnlyList<HomeworkDto>>>
 {
     public async Task<Result<IReadOnlyList<HomeworkDto>>> Handle(GetHomeworkListQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = homework.Query;
+
+        if (!scope.IsUnrestricted)
+        {
+            var visible = scope.GroupIds.ToArray();
+            query = query.Where(h => visible.Contains(h.StudyGroupId));
+        }
 
         if (request.StudyGroupId.HasValue)
         {
@@ -200,15 +253,18 @@ public sealed class GetHomeworkSubmissionsQueryHandler(
     IRepository<Homework> homework,
     IRepository<HomeworkSubmission> submissions,
     IRepository<Enrollment> enrollments,
-    IRepository<StudentProfile> students)
+    IRepository<StudentProfile> students,
+    IRepository<StoredFile> files,
+    DataScopeService dataScope)
     : IRequestHandler<GetHomeworkSubmissionsQuery, Result<IReadOnlyList<SubmissionRowDto>>>
 {
     public async Task<Result<IReadOnlyList<SubmissionRowDto>>> Handle(GetHomeworkSubmissionsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var item = await homework.GetByIdAsync(request.HomeworkId, cancellationToken).ConfigureAwait(false);
 
-        if (item is null)
+        if (item is null || !scope.CanSeeGroup(item.StudyGroupId))
         {
             return Result<IReadOnlyList<SubmissionRowDto>>.Failure("Homework.NotFound", "Homework not found.");
         }
@@ -217,10 +273,16 @@ public sealed class GetHomeworkSubmissionsQueryHandler(
         var rows = await submissions.Query.Where(s => s.HomeworkId == item.Id)
             .ToDictionaryAsync(static s => s.StudentProfileId, cancellationToken).ConfigureAwait(false);
 
-        var list = roster.Select(r =>
+        var filesBySubmission = await HomeworkFiles
+            .BySubmissionAsync(files, [.. rows.Values.Select(static v => v.Id)], cancellationToken)
+            .ConfigureAwait(false);
+
+        // A family sees its own children's rows only.
+        var list = roster.Where(r => !scope.IsFamily || scope.StudentIds.Contains(r.Id)).Select(r =>
             {
                 var s = rows.GetValueOrDefault(r.Id);
-                return new SubmissionRowDto(r.Id, r.FullName, s?.Status ?? SubmissionStatus.Pending, s?.SubmittedAt, s?.Grade, s?.Feedback);
+                IReadOnlyList<SubmissionFileDto> attached = s is not null && filesBySubmission.TryGetValue(s.Id, out var found) ? found : [];
+                return new SubmissionRowDto(r.Id, r.FullName, s?.Status ?? SubmissionStatus.Pending, s?.SubmittedAt, s?.Grade, s?.Feedback, attached);
             })
             .ToList();
 
@@ -239,7 +301,9 @@ public sealed class CreateHomeworkCommandHandler(
     IRepository<StudentProfile> students,
     SchedulingReadModel scheduling,
     NotificationService notifier,
+    WhatsAppMessenger whatsApp,
     IDateTimeService clock,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<CreateHomeworkCommand, Result<HomeworkDto>>
 {
@@ -248,7 +312,10 @@ public sealed class CreateHomeworkCommandHandler(
         ArgumentNullException.ThrowIfNull(command);
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
         var r = command.Request;
-        var group = await groups.GetByIdAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+        var group = scope.CanManageGroup(r.StudyGroupId)
+            ? await groups.GetByIdAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false)
+            : null;
 
         if (group is null)
         {
@@ -271,9 +338,15 @@ public sealed class CreateHomeworkCommandHandler(
         var roster = await LearningSupport.ActiveRosterAsync(enrollments, students, group.Id, cancellationToken).ConfigureAwait(false);
         var recipients = await notifier.RecipientsByStudentAsync(roster.Select(static s => s.Id).ToArray(), cancellationToken).ConfigureAwait(false);
         await notifier.NotifyAsync(tenantId, recipients.Values.SelectMany(static v => v), $"New homework: {item.Title}",
-            $"{group.Name} - due {item.DueDate:yyyy-MM-dd}", "/homework", cancellationToken).ConfigureAwait(false);
+            $"{group.Name} - due {item.DueDate:yyyy-MM-dd}", "/my-family", cancellationToken).ConfigureAwait(false);
 
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        // After the commit, best-effort: parents with a mobile number also get it on WhatsApp.
+        await whatsApp.NotifyParentsAsync(
+                [.. roster.Select(r => new ParentUpdate(r.Id, $"واجب جديد: {item.Title}", $"{group.Name} - آخر موعد {item.DueDate:yyyy-MM-dd}"))],
+                cancellationToken)
+            .ConfigureAwait(false);
 
         return Result<HomeworkDto>.Success((await HomeworkMapper.BuildAsync([item], submissions, enrollments, scheduling, cancellationToken).ConfigureAwait(false))[0],
             "Homework created successfully.");
@@ -287,14 +360,16 @@ public sealed class UpdateHomeworkCommandHandler(
     IRepository<HomeworkSubmission> submissions,
     IRepository<Enrollment> enrollments,
     SchedulingReadModel scheduling,
+    DataScopeService dataScope,
     IUnitOfWork unitOfWork) : IRequestHandler<UpdateHomeworkCommand, Result<HomeworkDto>>
 {
     public async Task<Result<HomeworkDto>> Handle(UpdateHomeworkCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var item = await homework.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (item is null)
+        if (item is null || !scope.CanManageGroup(item.StudyGroupId))
         {
             return Result<HomeworkDto>.Failure("Homework.NotFound", "Homework not found.");
         }
@@ -313,15 +388,16 @@ public sealed class UpdateHomeworkCommandHandler(
 
 public sealed record DeleteHomeworkCommand(Guid Id) : IRequest<Result<bool>>;
 
-public sealed class DeleteHomeworkCommandHandler(IRepository<Homework> homework, IUnitOfWork unitOfWork)
+public sealed class DeleteHomeworkCommandHandler(IRepository<Homework> homework, DataScopeService dataScope, IUnitOfWork unitOfWork)
     : IRequestHandler<DeleteHomeworkCommand, Result<bool>>
 {
     public async Task<Result<bool>> Handle(DeleteHomeworkCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var item = await homework.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (item is null)
+        if (item is null || !scope.CanManageGroup(item.StudyGroupId))
         {
             return Result<bool>.Failure("Homework.NotFound", "Homework not found.");
         }
@@ -342,6 +418,7 @@ public sealed class UpdateSubmissionsCommandHandler(
     IRepository<StudentProfile> students,
     IMediator mediator,
     IDateTimeService clock,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<UpdateSubmissionsCommand, Result<IReadOnlyList<SubmissionRowDto>>>
 {
@@ -349,9 +426,10 @@ public sealed class UpdateSubmissionsCommandHandler(
     {
         ArgumentNullException.ThrowIfNull(command);
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var item = await homework.GetByIdAsync(command.HomeworkId, cancellationToken).ConfigureAwait(false);
 
-        if (item is null)
+        if (item is null || !scope.CanManageGroup(item.StudyGroupId))
         {
             return Result<IReadOnlyList<SubmissionRowDto>>.Failure("Homework.NotFound", "Homework not found.");
         }
@@ -400,13 +478,20 @@ public sealed class UpdateSubmissionsCommandHandler(
 
 public sealed record GetExamsQuery(Guid? StudyGroupId) : IRequest<Result<IReadOnlyList<ExamDto>>>;
 
-public sealed class GetExamsQueryHandler(IRepository<Exam> exams, IRepository<ExamResult> results, SchedulingReadModel scheduling)
+public sealed class GetExamsQueryHandler(IRepository<Exam> exams, IRepository<ExamResult> results, SchedulingReadModel scheduling, DataScopeService dataScope)
     : IRequestHandler<GetExamsQuery, Result<IReadOnlyList<ExamDto>>>
 {
     public async Task<Result<IReadOnlyList<ExamDto>>> Handle(GetExamsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = exams.Query;
+
+        if (!scope.IsUnrestricted)
+        {
+            var visible = scope.GroupIds.ToArray();
+            query = query.Where(e => visible.Contains(e.StudyGroupId));
+        }
 
         if (request.StudyGroupId.HasValue)
         {
@@ -450,15 +535,17 @@ public sealed class GetExamResultsQueryHandler(
     IRepository<Exam> exams,
     IRepository<ExamResult> results,
     IRepository<Enrollment> enrollments,
-    IRepository<StudentProfile> students)
+    IRepository<StudentProfile> students,
+    DataScopeService dataScope)
     : IRequestHandler<GetExamResultsQuery, Result<IReadOnlyList<ExamResultRowDto>>>
 {
     public async Task<Result<IReadOnlyList<ExamResultRowDto>>> Handle(GetExamResultsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var exam = await exams.GetByIdAsync(request.ExamId, cancellationToken).ConfigureAwait(false);
 
-        if (exam is null)
+        if (exam is null || !scope.CanSeeGroup(exam.StudyGroupId))
         {
             return Result<IReadOnlyList<ExamResultRowDto>>.Failure("Exams.NotFound", "Exam not found.");
         }
@@ -467,7 +554,8 @@ public sealed class GetExamResultsQueryHandler(
         var rows = await results.Query.Where(r => r.ExamId == exam.Id)
             .ToDictionaryAsync(static r => r.StudentProfileId, cancellationToken).ConfigureAwait(false);
 
-        return Result<IReadOnlyList<ExamResultRowDto>>.Success(roster.Select(s =>
+        // A family sees its own children's results only.
+        return Result<IReadOnlyList<ExamResultRowDto>>.Success(roster.Where(s => !scope.IsFamily || scope.StudentIds.Contains(s.Id)).Select(s =>
             {
                 var r = rows.GetValueOrDefault(s.Id);
                 return new ExamResultRowDto(s.Id, s.FullName, r?.Score, r?.IsAbsent ?? false, r?.Notes, r is not null);
@@ -483,6 +571,7 @@ public sealed class CreateExamCommandHandler(
     IRepository<Exam> exams,
     IRepository<ExamResult> results,
     SchedulingReadModel scheduling,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<CreateExamCommand, Result<ExamDto>>
 {
@@ -491,8 +580,10 @@ public sealed class CreateExamCommandHandler(
         ArgumentNullException.ThrowIfNull(command);
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
         var r = command.Request;
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!await groups.ExistsAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false))
+        if (!scope.CanManageGroup(r.StudyGroupId)
+            || !await groups.ExistsAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false))
         {
             return Result<ExamDto>.Failure("Groups.NotFound", "Study group not found.");
         }
@@ -516,15 +607,17 @@ public sealed class CreateExamCommandHandler(
 
 public sealed record UpdateExamCommand(Guid Id, UpdateExamRequest Request) : IRequest<Result<ExamDto>>;
 
-public sealed class UpdateExamCommandHandler(IRepository<Exam> exams, IRepository<ExamResult> results, SchedulingReadModel scheduling, IUnitOfWork unitOfWork)
+public sealed class UpdateExamCommandHandler(
+    IRepository<Exam> exams, IRepository<ExamResult> results, SchedulingReadModel scheduling, DataScopeService dataScope, IUnitOfWork unitOfWork)
     : IRequestHandler<UpdateExamCommand, Result<ExamDto>>
 {
     public async Task<Result<ExamDto>> Handle(UpdateExamCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var exam = await exams.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (exam is null)
+        if (exam is null || !scope.CanManageGroup(exam.StudyGroupId))
         {
             return Result<ExamDto>.Failure("Exams.NotFound", "Exam not found.");
         }
@@ -542,14 +635,16 @@ public sealed class UpdateExamCommandHandler(IRepository<Exam> exams, IRepositor
 
 public sealed record DeleteExamCommand(Guid Id) : IRequest<Result<bool>>;
 
-public sealed class DeleteExamCommandHandler(IRepository<Exam> exams, IUnitOfWork unitOfWork) : IRequestHandler<DeleteExamCommand, Result<bool>>
+public sealed class DeleteExamCommandHandler(IRepository<Exam> exams, DataScopeService dataScope, IUnitOfWork unitOfWork)
+    : IRequestHandler<DeleteExamCommand, Result<bool>>
 {
     public async Task<Result<bool>> Handle(DeleteExamCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var exam = await exams.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (exam is null)
+        if (exam is null || !scope.CanManageGroup(exam.StudyGroupId))
         {
             return Result<bool>.Failure("Exams.NotFound", "Exam not found.");
         }
@@ -569,7 +664,9 @@ public sealed class RecordExamResultsCommandHandler(
     IRepository<Enrollment> enrollments,
     IRepository<StudentProfile> students,
     NotificationService notifier,
+    WhatsAppMessenger whatsApp,
     IMediator mediator,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<RecordExamResultsCommand, Result<IReadOnlyList<ExamResultRowDto>>>
 {
@@ -577,9 +674,10 @@ public sealed class RecordExamResultsCommandHandler(
     {
         ArgumentNullException.ThrowIfNull(command);
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var exam = await exams.GetByIdAsync(command.ExamId, cancellationToken).ConfigureAwait(false);
 
-        if (exam is null)
+        if (exam is null || !scope.CanManageGroup(exam.StudyGroupId))
         {
             return Result<IReadOnlyList<ExamResultRowDto>>.Failure("Exams.NotFound", "Exam not found.");
         }
@@ -619,10 +717,19 @@ public sealed class RecordExamResultsCommandHandler(
         foreach (var i in input)
         {
             var body = i.IsAbsent ? "Absent" : $"{i.Score}/{exam.MaxScore}";
-            await notifier.NotifyAsync(tenantId, recipients.GetValueOrDefault(i.StudentProfileId, []), $"Exam result: {exam.Title}", body, "/exams", cancellationToken).ConfigureAwait(false);
+            await notifier.NotifyAsync(tenantId, recipients.GetValueOrDefault(i.StudentProfileId, []), $"Exam result: {exam.Title}", body, "/my-family", cancellationToken).ConfigureAwait(false);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        await whatsApp.NotifyParentsAsync(
+                [.. input.Select(i => new ParentUpdate(
+                    i.StudentProfileId,
+                    $"نتيجة امتحان: {exam.Title}",
+                    i.IsAbsent ? "غائب" : $"{i.Score}/{exam.MaxScore}"))],
+                cancellationToken)
+            .ConfigureAwait(false);
+
         return await mediator.Send(new GetExamResultsQuery(exam.Id), cancellationToken).ConfigureAwait(false);
     }
 }

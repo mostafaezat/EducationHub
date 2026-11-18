@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Extensions;
 using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Interfaces;
@@ -36,6 +37,7 @@ public sealed class SessionMaterializer(
         DateOnly from,
         DateOnly to,
         Guid? studyGroupId,
+        IReadOnlyCollection<Guid>? allowedGroupIds,
         CancellationToken cancellationToken)
     {
         var groupQuery = groups.Query.Where(static g => g.IsActive);
@@ -43,6 +45,13 @@ public sealed class SessionMaterializer(
         if (studyGroupId.HasValue)
         {
             groupQuery = groupQuery.Where(g => g.Id == studyGroupId.Value);
+        }
+
+        // A teacher generates sessions for the groups they teach, never a colleague's.
+        if (allowedGroupIds is not null)
+        {
+            var allowed = allowedGroupIds.ToArray();
+            groupQuery = groupQuery.Where(g => allowed.Contains(g.Id));
         }
 
         var groupRows = await groupQuery
@@ -126,14 +135,24 @@ public sealed record GetSessionsQuery(
     Guid? TeacherProfileId,
     SessionStatus? Status) : IRequest<Result<PaginatedList<ClassSessionDto>>>;
 
-public sealed class GetSessionsQueryHandler(IRepository<ClassSession> sessions, SchedulingReadModel readModel)
+public sealed class GetSessionsQueryHandler(IRepository<ClassSession> sessions, SchedulingReadModel readModel, DataScopeService dataScope)
     : IRequestHandler<GetSessionsQuery, Result<PaginatedList<ClassSessionDto>>>
 {
     public async Task<Result<PaginatedList<ClassSessionDto>>> Handle(GetSessionsQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var query = sessions.Query;
+
+        if (!scope.IsUnrestricted)
+        {
+            var visibleGroups = scope.GroupIds.ToArray();
+            var ownTeacherIds = scope.TeacherProfileIds.ToArray();
+
+            query = query.Where(s => visibleGroups.Contains(s.StudyGroupId)
+                || (s.TeacherProfileId != null && ownTeacherIds.Contains(s.TeacherProfileId.Value)));
+        }
 
         if (request.From.HasValue)
         {
@@ -176,14 +195,20 @@ public sealed class GetSessionsQueryHandler(IRepository<ClassSession> sessions, 
 
 public sealed record GetSessionQuery(Guid Id) : IRequest<Result<ClassSessionDto>>;
 
-public sealed class GetSessionQueryHandler(IRepository<ClassSession> sessions, SchedulingReadModel readModel)
+public sealed class GetSessionQueryHandler(IRepository<ClassSession> sessions, SchedulingReadModel readModel, DataScopeService dataScope)
     : IRequestHandler<GetSessionQuery, Result<ClassSessionDto>>
 {
     public async Task<Result<ClassSessionDto>> Handle(GetSessionQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var session = await sessions.GetByIdAsync(request.Id, cancellationToken).ConfigureAwait(false);
+
+        if (session is not null && !scope.CanSeeSession(session))
+        {
+            session = null;
+        }
 
         return session is null
             ? Result<ClassSessionDto>.Failure("Sessions.NotFound", "Session not found.")
@@ -201,16 +226,18 @@ public sealed class GetSessionAttendanceQueryHandler(
     IRepository<ClassSession> sessions,
     IRepository<Enrollment> enrollments,
     IRepository<SessionAttendance> attendance,
-    IRepository<StudentProfile> students)
+    IRepository<StudentProfile> students,
+    DataScopeService dataScope)
     : IRequestHandler<GetSessionAttendanceQuery, Result<IReadOnlyList<AttendanceRowDto>>>
 {
     public async Task<Result<IReadOnlyList<AttendanceRowDto>>> Handle(GetSessionAttendanceQuery request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var session = await sessions.GetByIdAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
 
-        if (session is null)
+        if (session is null || !scope.CanSeeSession(session))
         {
             return Result<IReadOnlyList<AttendanceRowDto>>.Failure("Sessions.NotFound", "Session not found.");
         }
@@ -233,6 +260,7 @@ public sealed class GetSessionAttendanceQueryHandler(
                 .ConfigureAwait(false);
 
         var rows = roster.Concat(extras)
+            .Where(s => !scope.IsFamily || scope.StudentIds.Contains(s.Id))
             .OrderBy(static s => s.FullName)
             .Select(s =>
             {
@@ -274,6 +302,7 @@ public sealed record GenerateSessionsCommand(GenerateSessionsRequest Request) : 
 public sealed class GenerateSessionsCommandHandler(
     SessionMaterializer materializer,
     IRepository<StudyGroup> groups,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<GenerateSessionsCommand, Result<GenerateSessionsResultDto>>
 {
@@ -283,13 +312,22 @@ public sealed class GenerateSessionsCommandHandler(
 
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
         var r = command.Request;
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
 
-        if (r.StudyGroupId is { } groupId && !await groups.ExistsAsync(groupId, cancellationToken).ConfigureAwait(false))
+        if (r.StudyGroupId is { } groupId
+            && (!scope.CanManageGroup(groupId) || !await groups.ExistsAsync(groupId, cancellationToken).ConfigureAwait(false)))
         {
             return Result<GenerateSessionsResultDto>.Failure("Groups.NotFound", "Study group not found.");
         }
 
-        var result = await materializer.MaterializeAsync(tenantId, r.From, r.To, r.StudyGroupId, cancellationToken).ConfigureAwait(false);
+        var result = await materializer.MaterializeAsync(
+                tenantId,
+                r.From,
+                r.To,
+                r.StudyGroupId,
+                scope.IsUnrestricted ? null : scope.ManageableGroupIds,
+                cancellationToken)
+            .ConfigureAwait(false);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return Result<GenerateSessionsResultDto>.Success(result, $"{result.Created} session(s) created.");
@@ -304,6 +342,7 @@ public sealed class CreateSessionCommandHandler(
     IRepository<TeacherProfile> teachers,
     IRepository<ClassSession> sessions,
     SchedulingReadModel readModel,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<CreateSessionCommand, Result<ClassSessionDto>>
 {
@@ -313,7 +352,10 @@ public sealed class CreateSessionCommandHandler(
 
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
         var r = command.Request;
-        var group = await groups.GetByIdAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+        var group = scope.CanManageGroup(r.StudyGroupId)
+            ? await groups.GetByIdAsync(r.StudyGroupId, cancellationToken).ConfigureAwait(false)
+            : null;
 
         if (group is null)
         {
@@ -352,15 +394,17 @@ public sealed class UpdateSessionCommandHandler(
     IRepository<ClassSession> sessions,
     IRepository<TeacherProfile> teachers,
     SchedulingReadModel readModel,
+    DataScopeService dataScope,
     IUnitOfWork unitOfWork) : IRequestHandler<UpdateSessionCommand, Result<ClassSessionDto>>
 {
     public async Task<Result<ClassSessionDto>> Handle(UpdateSessionCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var session = await sessions.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (session is null)
+        if (session is null || !scope.CanManageSession(session))
         {
             return Result<ClassSessionDto>.Failure("Sessions.NotFound", "Session not found.");
         }
@@ -403,16 +447,17 @@ public sealed class UpdateSessionCommandHandler(
 /// <summary>Soft-deletes a session (its attendance rows stay with it).</summary>
 public sealed record DeleteSessionCommand(Guid Id) : IRequest<Result<bool>>;
 
-public sealed class DeleteSessionCommandHandler(IRepository<ClassSession> sessions, IUnitOfWork unitOfWork)
+public sealed class DeleteSessionCommandHandler(IRepository<ClassSession> sessions, DataScopeService dataScope, IUnitOfWork unitOfWork)
     : IRequestHandler<DeleteSessionCommand, Result<bool>>
 {
     public async Task<Result<bool>> Handle(DeleteSessionCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var session = await sessions.GetByIdAsync(command.Id, cancellationToken).ConfigureAwait(false);
 
-        if (session is null)
+        if (session is null || !scope.CanManageSession(session))
         {
             return Result<bool>.Failure("Sessions.NotFound", "Session not found.");
         }
@@ -436,6 +481,7 @@ public sealed class MarkAttendanceCommandHandler(
     IRepository<SessionAttendance> attendance,
     IRepository<StudentProfile> students,
     IMediator mediator,
+    DataScopeService dataScope,
     ITenantContext tenantContext,
     IUnitOfWork unitOfWork) : IRequestHandler<MarkAttendanceCommand, Result<IReadOnlyList<AttendanceRowDto>>>
 {
@@ -444,9 +490,10 @@ public sealed class MarkAttendanceCommandHandler(
         ArgumentNullException.ThrowIfNull(command);
 
         var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
         var session = await sessions.GetByIdAsync(command.SessionId, cancellationToken).ConfigureAwait(false);
 
-        if (session is null)
+        if (session is null || !scope.CanManageSession(session))
         {
             return Result<IReadOnlyList<AttendanceRowDto>>.Failure("Sessions.NotFound", "Session not found.");
         }

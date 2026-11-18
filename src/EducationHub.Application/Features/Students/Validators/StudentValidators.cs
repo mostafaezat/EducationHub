@@ -1,3 +1,4 @@
+using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Validation;
 using EducationHub.Application.Features.Students.Commands;
 using EducationHub.Application.Features.Students.DTOs;
@@ -67,6 +68,35 @@ public sealed class CreateStudentRequestValidator : LocalizedValidator<CreateStu
                     .EmailAddress().WithMessage(_ => Message(LocalizationKeys.EmailInvalid, "Email is not a valid address."));
 
                 AccountPasswordRules.Apply(RuleFor(x => x.AccountPassword), Message);
+            });
+
+        When(
+            static x => x.Guardian is not null,
+            () =>
+            {
+                RuleFor(x => x.Guardian!.FullName)
+                    .NotEmpty().WithMessage(_ => Message(LocalizationKeys.FullNameRequired, "Full name is required."))
+                    .MinimumLength(3).WithMessage(_ => Message(LocalizationKeys.FullNameMinLength3, "Full name must be at least 3 characters."))
+                    .MaximumLength(200).WithMessage(_ => Message(LocalizationKeys.FullNameMaxLength200, "Full name must not exceed 200 characters."));
+
+                RuleFor(x => x.Guardian!.PhoneNumber).MaximumLength(50);
+
+                RuleFor(x => x.Guardian!.Email)
+                    .MaximumLength(256).WithMessage(_ => Message(LocalizationKeys.EmailMaxLength, "Email must not exceed 256 characters."))
+                    .EmailAddress().WithMessage(_ => Message(LocalizationKeys.EmailInvalid, "Email is not a valid address."))
+                    .When(static x => !string.IsNullOrWhiteSpace(x.Guardian!.Email));
+
+                RuleFor(x => x.Guardian)
+                    .Must(static g => !string.IsNullOrWhiteSpace(g!.Email) || PhoneNumberFormat.LooksLikePhone(g.PhoneNumber))
+                    .WithMessage("An e-mail address or a mobile number is required to create the parent's sign-in account.")
+                    .When(static x => x.Guardian!.CreateAccount);
+
+                RuleFor(x => x.Guardian!.PhoneNumber)
+                    .Must(static phone => PhoneNumberFormat.LooksLikePhone(phone))
+                    .WithMessage("The mobile number is not valid.")
+                    .When(static x => !string.IsNullOrWhiteSpace(x.Guardian!.PhoneNumber));
+
+                RuleFor(x => x.Guardian!.Relationship).IsInEnum();
             });
 
         When(

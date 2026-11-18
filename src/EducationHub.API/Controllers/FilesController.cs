@@ -1,5 +1,8 @@
+using EducationHub.Application.Common.Access;
 using EducationHub.Application.Common.Interfaces;
+using EducationHub.Application.Features.Learning;
 using EducationHub.Domain.Entities.Files;
+using EducationHub.Domain.Entities.Learning;
 using EducationHub.Domain.Entities.Students;
 using EducationHub.Domain.Entities.Teachers;
 using EducationHub.Domain.Enums;
@@ -72,6 +75,10 @@ public sealed class FilesController(
     IRepository<StudentProfile> students,
     IRepository<ParentProfile> parents,
     IRepository<TeacherProfile> teachers,
+    IRepository<Homework> homework,
+    IRepository<HomeworkSubmission> submissions,
+    DataScopeService dataScope,
+    ICurrentUser currentUser,
     ITenantContext tenantContext) : ControllerBase
 {
     private const long MaxRequestBytes = 25L * 1024 * 1024;
@@ -87,7 +94,7 @@ public sealed class FilesController(
         [FromQuery] Guid? ownerEntityId = null,
         CancellationToken cancellationToken = default)
     {
-        var query = files.Query;
+        var query = await VisibleAsync(files.Query, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(ownerEntityName))
         {
@@ -160,7 +167,14 @@ public sealed class FilesController(
                 return Ok(Result<StoredFileDto>.Failure("Files.InvalidOwner", "Owner must be Student, Parent or Teacher with an id."));
             }
 
-            var exists = match switch
+            // A teacher attaches files to the students of their own groups or to their own
+            // profile only; answering "not found" keeps other owners unprobeable.
+            var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+            var allowed = scope.IsUnrestricted
+                || (match == "Student" && scope.StudentIds.Contains(ownerId))
+                || (match == "Teacher" && scope.TeacherProfileIds.Contains(ownerId));
+
+            var exists = allowed && match switch
             {
                 "Student" => await students.ExistsAsync(ownerId, cancellationToken).ConfigureAwait(false),
                 "Parent" => await parents.ExistsAsync(ownerId, cancellationToken).ConfigureAwait(false),
@@ -201,7 +215,9 @@ public sealed class FilesController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
     {
-        var entity = await files.GetByIdAsync(id, cancellationToken).ConfigureAwait(false);
+        var entity = await (await VisibleAsync(files.Query, cancellationToken).ConfigureAwait(false))
+            .FirstOrDefaultAsync(f => f.Id == id, cancellationToken)
+            .ConfigureAwait(false);
 
         if (entity is null)
         {
@@ -229,10 +245,45 @@ public sealed class FilesController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Result<bool>>> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var deleted = await storage.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+        var visible = await (await VisibleAsync(files.Query, cancellationToken).ConfigureAwait(false))
+            .AnyAsync(f => f.Id == id, cancellationToken)
+            .ConfigureAwait(false);
+
+        var deleted = visible && await storage.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
 
         return Ok(deleted
             ? Result<bool>.Success(true, "File deleted successfully.")
             : Result<bool>.Failure("Files.NotFound", "File not found."));
+    }
+
+    /// <summary>
+    /// Files the caller may see. Management roles see the tenant's files; a teacher sees files of
+    /// the students in their own groups, homework answers handed in to their groups, files of
+    /// their own teacher profile, and files they uploaded.
+    /// </summary>
+    private async Task<IQueryable<StoredFile>> VisibleAsync(IQueryable<StoredFile> query, CancellationToken cancellationToken)
+    {
+        var scope = await dataScope.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        if (scope.IsUnrestricted)
+        {
+            return query;
+        }
+
+        var studentIds = scope.StudentIds.ToArray();
+        var teacherIds = scope.TeacherProfileIds.ToArray();
+        var groupIds = scope.GroupIds.ToArray();
+        var userId = currentUser.UserId;
+
+        // Homework answers uploaded by the students of the teacher's groups.
+        var visibleSubmissions = submissions.Query
+            .Where(s => homework.Query.Any(h => h.Id == s.HomeworkId && groupIds.Contains(h.StudyGroupId)))
+            .Select(static s => s.Id);
+
+        return query.Where(f =>
+            (f.OwnerEntityName == "Student" && f.OwnerEntityId != null && studentIds.Contains(f.OwnerEntityId.Value))
+            || (f.OwnerEntityName == "Teacher" && f.OwnerEntityId != null && teacherIds.Contains(f.OwnerEntityId.Value))
+            || (f.OwnerEntityName == HomeworkFiles.OwnerName && f.OwnerEntityId != null && visibleSubmissions.Contains(f.OwnerEntityId.Value))
+            || (userId != null && f.CreatedById == userId));
     }
 }

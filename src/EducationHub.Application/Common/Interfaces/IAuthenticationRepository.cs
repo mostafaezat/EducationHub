@@ -49,6 +49,14 @@ public interface IAuthenticationRepository
     /// <summary>Loads the user, their roles and their permissions by normalized email.</summary>
     Task<AuthenticationSnapshot?> GetByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Loads the snapshot of the one account whose mobile number matches one of
+    /// <paramref name="phoneVariants"/> (the account's own number, or the number on the parent
+    /// profile linked to it). Returns null when no account - or more than one - matches, so an
+    /// ambiguous number can never sign into the wrong account.
+    /// </summary>
+    Task<AuthenticationSnapshot?> GetByPhoneAsync(IReadOnlyList<string> phoneVariants, CancellationToken cancellationToken = default);
+
     /// <summary>Loads the same snapshot by user id. Used by the refresh flow.</summary>
     Task<AuthenticationSnapshot?> GetByIdAsync(Guid userId, CancellationToken cancellationToken = default);
 

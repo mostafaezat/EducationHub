@@ -70,17 +70,24 @@ public sealed class AuditSaveChangesInterceptor(
             return;
         }
 
-        var actorId = currentUser.UserId;
+        var requestTenantId = currentUser.TenantId is { } t && t != Guid.Empty ? t : (Guid?)null;
 
         foreach (var entry in entries)
         {
             var isInsert = entry.State == EntityState.Added;
 
+            // Sign-in writes (login history, refresh tokens, last-login stamps) happen before
+            // the request is authenticated, so there is no caller yet: the row's own user is
+            // the actor.
+            var actorId = currentUser.UserId ?? ReadGuid(entry, "UserId");
+
             var log = new AuditLog
             {
-                // A platform administrator has no tenant, so their actions are recorded with
-                // an empty tenant id and remain visible only in platform scope.
-                TenantId = currentUser.TenantId ?? Guid.Empty,
+                // The request's tenant when there is one. Otherwise - an anonymous sign-in, or
+                // the platform administrator - the tenant that owns the changed row, so a
+                // centre's audit trail shows its own users' sign-ins and what the platform
+                // changed in its data. Rows owned by no tenant stay platform-only (Guid.Empty).
+                TenantId = requestTenantId ?? ReadGuid(entry, "TenantId") ?? Guid.Empty,
                 UserId = actorId,
                 UserName = currentUser.UserName,
                 Action = isInsert ? AuditAction.Created : AuditAction.Updated,
@@ -97,6 +104,14 @@ public sealed class AuditSaveChangesInterceptor(
 
             context.Set<AuditLog>().Add(log);
         }
+    }
+
+    /// <summary>Reads a Guid / Guid? property of the entry when the entity has one.</summary>
+    private static Guid? ReadGuid(EntityEntry entry, string propertyName)
+    {
+        var property = entry.Properties.FirstOrDefault(p => p.Metadata.Name == propertyName);
+
+        return property?.CurrentValue is Guid value && value != Guid.Empty ? value : null;
     }
 
     private static string? GetEntityId(EntityEntry entry)

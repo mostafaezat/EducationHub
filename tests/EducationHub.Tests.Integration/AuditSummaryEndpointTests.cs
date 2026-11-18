@@ -58,6 +58,18 @@ public sealed class AuditSummaryEndpointTests(ApiTestFixture fixture)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task A_tenants_own_sign_ins_appear_in_its_audit_log()
+    {
+        var (_, token) = await ProvisionAndLoginAsync("audit-own");
+
+        using var response = await Client.GetAsync("/api/audit/logs?pageSize=50&entityName=LoginHistory", token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var items = (await response.ReadJsonAsync()).GetProperty("data").GetProperty("items");
+        Assert.NotEmpty(items.EnumerateArray());
+    }
+
     private async Task<(TenantAdmin Tenant, string Token)> ProvisionAndLoginAsync(string prefix)
     {
         var platform = await ApiScenarios.PlatformAdminTokenAsync(Client);

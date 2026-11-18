@@ -15,6 +15,8 @@ import { AR_TENANTS } from './parts/ar/tenants';
 import { AR_STUDENTS } from './parts/ar/students';
 import { AR_TEACHERS } from './parts/ar/teachers';
 import { AR_USERS } from './parts/ar/users';
+import { AR_FAMILY } from './parts/ar/family';
+import { AR_REGISTRATION } from './parts/ar/registration';
 
 /** Arabic catalog. Key set must stay identical to en.ts - enforced by the i18n check script. */
 export const AR: Record<string, string> = {
@@ -34,5 +36,7 @@ export const AR: Record<string, string> = {
   ...AR_TEACHERS,
   ...AR_STUDENTS,
   ...AR_AUDIT,
-  ...AR_OPERATIONS
+  ...AR_OPERATIONS,
+  ...AR_FAMILY,
+  ...AR_REGISTRATION
 };

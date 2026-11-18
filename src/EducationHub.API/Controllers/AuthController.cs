@@ -1,3 +1,4 @@
+using EducationHub.API.Auth;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Auth.Commands;
 using EducationHub.Application.Features.Auth.DTOs;
@@ -104,6 +105,39 @@ public sealed class AuthController(IMediator mediator) : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await mediator
             .Send(new ResetPasswordCommand(request), cancellationToken)
+            .ConfigureAwait(false));
+
+    /// <summary>
+    /// Sends a 6-digit password-reset code by WhatsApp to a registered mobile number. Always
+    /// answers the same success, so numbers cannot be probed.
+    /// </summary>
+    [HttpPost("forgot-password/phone")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.PhoneReset)]
+    [PhoneRateLimit("forgot")]
+    [ProducesResponseType(typeof(Result), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<Result>> ForgotPasswordByPhone(
+        [FromBody] ForgotPasswordByPhoneRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator
+            .Send(new ForgotPasswordByPhoneCommand(request), cancellationToken)
+            .ConfigureAwait(false));
+
+    /// <summary>Completes a password reset with the code sent by WhatsApp.</summary>
+    [HttpPost("reset-password/phone")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.PhoneReset)]
+    [PhoneRateLimit("reset")]
+    [ProducesResponseType(typeof(Result), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<Result>> ResetPasswordByPhone(
+        [FromBody] ResetPasswordByPhoneRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator
+            .Send(new ResetPasswordByPhoneCommand(request), cancellationToken)
             .ConfigureAwait(false));
 
     /// <summary>Confirms an email with the token from the confirmation email.</summary>

@@ -121,6 +121,10 @@ public static class PermissionConstants
     public const string ExamsView = "Exams.View";
     public const string ExamsManage = "Exams.Manage";
 
+    // ---- Pre-registration requests from the public form -------------------
+    public const string RegistrationRequestsView = "RegistrationRequests.View";
+    public const string RegistrationRequestsManage = "RegistrationRequests.Manage";
+
     // ---- Dashboard ----------------------------------------------------------
     public const string DashboardView = "Dashboard.View";
 
@@ -283,6 +287,11 @@ public static class PermissionConstants
                 ExamsView,
                 ExamsManage
             ],
+            ["RegistrationRequests"] =
+            [
+                RegistrationRequestsView,
+                RegistrationRequestsManage
+            ],
             ["Dashboard"] =
             [
                 DashboardView
@@ -305,6 +314,17 @@ public static class PermissionConstants
     /// </summary>
     public static IReadOnlyList<string> PlatformAreaNames { get; } =
         ["Auth", "Platform", "Users", "Roles", "Permissions", "Tenants", "Dashboard", "AuditLogs"];
+
+    /// <summary>
+    /// Areas only the platform administrator can hold: managing tenants, plans and platform
+    /// settings. No tenant role carries them - a tenant cannot manage the platform, and the
+    /// endpoints behind them require the platform role anyway.
+    /// </summary>
+    public static IReadOnlyList<string> PlatformOnlyAreaNames { get; } = ["Platform", "Tenants"];
+
+    /// <summary>Every permission a tenant role may hold (the catalog minus the platform-only areas).</summary>
+    public static IReadOnlyList<string> GetTenantPermissions()
+        => [.. Areas.Where(static a => !PlatformOnlyAreaNames.Contains(a.Key)).SelectMany(static a => a.Value)];
 
     /// <summary>The exact permission set of the <c>PlatformAdmin</c> role.</summary>
     public static IReadOnlyList<string> GetPlatformPermissions()

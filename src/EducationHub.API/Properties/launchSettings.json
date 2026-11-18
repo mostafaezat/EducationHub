@@ -13,7 +13,8 @@
         "EDUCATIONHUB_DEMO_TENANT_ADMIN_PASSWORD": "Admin1234",
         "EDUCATIONHUB_DEMO_TEACHER_PASSWORD": "Demo#Teacher123",
         "EDUCATIONHUB_DEMO_STUDENT_PASSWORD": "Demo#Family123",
-        "EDUCATIONHUB_DEMO_PARENT_PASSWORD": "Demo#Family123"
+        "EDUCATIONHUB_DEMO_PARENT_PASSWORD": "Demo#Family123",
+        "EDUCATIONHUB_DEMO_STAFF_PASSWORD": "Demo#Staff123"
       },
       "applicationUrl": "https://localhost:57734;http://localhost:57735"
     }

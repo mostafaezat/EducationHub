@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using EducationHub.Application.Common.Helpers;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Users.Commands;
@@ -67,7 +68,7 @@ public sealed class ProfileAccountSupport(
     }
 
     /// <summary>Creates a new account carrying <paramref name="roleName"/>.</summary>
-    public async Task<AccountResolution> CreateAsync(
+    public Task<AccountResolution> CreateAsync(
         string email,
         string password,
         string fullName,
@@ -75,6 +76,63 @@ public sealed class ProfileAccountSupport(
         string roleName,
         Guid tenantId,
         string errorPrefix,
+        CancellationToken cancellationToken)
+        => CreateCoreAsync(email, password, fullName, phoneNumber, roleName, tenantId, errorPrefix, mustChangePassword: false, cancellationToken);
+
+    /// <summary>
+    /// Creates a new account with a generated temporary password that must be changed at the
+    /// first sign-in. Returns the password so the staff member can hand it over once.
+    /// </summary>
+    public async Task<(AccountResolution Account, string? TemporaryPassword)> CreateWithTemporaryPasswordAsync(
+        string email,
+        string fullName,
+        string? phoneNumber,
+        string roleName,
+        Guid tenantId,
+        string errorPrefix,
+        CancellationToken cancellationToken)
+    {
+        var password = GenerateTemporaryPassword();
+
+        var account = await CreateCoreAsync(
+                email, password, fullName, phoneNumber, roleName, tenantId, errorPrefix, mustChangePassword: true, cancellationToken)
+            .ConfigureAwait(false);
+
+        return (account, account.User is null ? null : password);
+    }
+
+    /// <summary>
+    /// 10 characters from an unambiguous alphabet, always with a digit and a lowercase letter
+    /// (the Identity password policy), drawn from a cryptographic random source.
+    /// </summary>
+    internal static string GenerateTemporaryPassword()
+    {
+        const string letters = "abcdefghjkmnpqrstuvwxyz";
+        const string digits = "23456789";
+        const string all = letters + digits;
+
+        var chars = new char[10];
+
+        for (var i = 0; i < chars.Length; i++)
+        {
+            chars[i] = all[RandomNumberGenerator.GetInt32(all.Length)];
+        }
+
+        chars[RandomNumberGenerator.GetInt32(0, 5)] = letters[RandomNumberGenerator.GetInt32(letters.Length)];
+        chars[RandomNumberGenerator.GetInt32(5, 10)] = digits[RandomNumberGenerator.GetInt32(digits.Length)];
+
+        return new string(chars);
+    }
+
+    private async Task<AccountResolution> CreateCoreAsync(
+        string email,
+        string password,
+        string fullName,
+        string? phoneNumber,
+        string roleName,
+        Guid tenantId,
+        string errorPrefix,
+        bool mustChangePassword,
         CancellationToken cancellationToken)
     {
         var normalizedEmail = Normalize.Required(email, string.Empty);
@@ -88,6 +146,26 @@ public sealed class ProfileAccountSupport(
             return AccountResolution.Failed(
                 "Users.EmailAlreadyExists",
                 "A user with this email address already exists.");
+        }
+
+        // A mobile number is a sign-in identifier too, so it must point at one account only.
+        var canonicalPhone = PhoneNumberFormat.ToCanonical(phoneNumber);
+
+        if (canonicalPhone is not null)
+        {
+            var variants = PhoneNumberFormat.LookupVariants(canonicalPhone).ToArray();
+
+            var phoneTaken = await userManager.Users
+                .IgnoreQueryFilters()
+                .AnyAsync(u => u.PhoneNumber != null && variants.Contains(u.PhoneNumber), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (phoneTaken)
+            {
+                return AccountResolution.Failed(
+                    "Users.PhoneAlreadyExists",
+                    "A user with this mobile number already exists.");
+            }
         }
 
         var roleExists = await roles.Query
@@ -107,10 +185,11 @@ public sealed class ProfileAccountSupport(
             FullName = Normalize.Required(fullName, string.Empty),
             Email = normalizedEmail,
             UserName = normalizedEmail,
-            PhoneNumber = Normalize.Optional(phoneNumber),
+            PhoneNumber = canonicalPhone ?? Normalize.Optional(phoneNumber),
             PreferredLanguage = SupportedLanguages.Default,
             IsActive = true,
-            EmailConfirmed = true
+            EmailConfirmed = true,
+            MustChangePassword = mustChangePassword
         };
 
         var created = await userManager.CreateAsync(user, password).ConfigureAwait(false);

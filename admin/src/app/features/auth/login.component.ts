@@ -36,14 +36,14 @@ import { NotificationService } from '../../core/services/notification.service';
 
         <form [formGroup]="form" (ngSubmit)="submit()" class="login-form">
           <div class="field">
-            <label for="email">{{ t('common.email') }}</label>
+            <label for="email">{{ t('login.form.identifierLabel') }}</label>
             <input
               id="email"
-              type="email"
+              type="text"
               pInputText
               formControlName="email"
               autocomplete="username"
-              placeholder="admin@educationhub.local"
+              [placeholder]="t('login.form.identifierPlaceholder')"
             />
           </div>
 
@@ -212,7 +212,8 @@ export class LoginComponent {
   protected readonly resending = signal(false);
 
   protected readonly form = this.fb.nonNullable.group({
-    email: ['', [Validators.required, Validators.email]],
+    // An e-mail address or a mobile number (parents can sign in with either).
+    email: ['', [Validators.required]],
     password: ['', [Validators.required]],
     rememberMe: [false]
   });

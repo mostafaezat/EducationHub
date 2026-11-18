@@ -21,7 +21,9 @@ public sealed class DatabaseSeeder(
     DemoTeacherSeeder teachers,
     DemoStudentParentSeeder students,
     DemoStudentProfileSeeder studentProfiles,
+    DemoStaffSeeder staff,
     DemoOperationsSeeder operations,
+    DemoRegistrationRequestSeeder registrationRequests,
     DevelopmentDataSeeder development,
     ILogger<DatabaseSeeder> logger)
 {
@@ -43,7 +45,13 @@ public sealed class DatabaseSeeder(
 
         await studentProfiles.SeedAsync(cancellationToken).ConfigureAwait(false);
 
+        // Owner / assistant / accountant demo accounts, and mobile numbers for the demo parents.
+        await staff.SeedAsync(cancellationToken).ConfigureAwait(false);
+
         await operations.SeedAsync(cancellationToken).ConfigureAwait(false);
+
+        // Pending pre-registration requests for the staff review page.
+        await registrationRequests.SeedAsync(cancellationToken).ConfigureAwait(false);
 
         await development.SeedAsync(cancellationToken).ConfigureAwait(false);
 

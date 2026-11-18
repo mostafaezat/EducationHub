@@ -172,4 +172,25 @@ public sealed class UserAccessReader(EducationHubDbContext context) : IUserAcces
 
         return groups.ToDictionary(static g => g.RoleId, static g => g.Count);
     }
+
+    public async Task<IReadOnlyList<Guid>> GetActiveUserIdsWithPermissionAsync(
+        Guid tenantId,
+        string permission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(permission);
+
+        // Filters bypassed and the tenant applied explicitly: the caller may be anonymous.
+        var roleIds = context.RoleClaims
+            .Where(rc => rc.ClaimType == EducationHubClaimTypes.PermissionClaimType && rc.ClaimValue == permission)
+            .Select(static rc => rc.RoleId);
+
+        return await context.Users
+            .IgnoreQueryFilters()
+            .Where(u => u.TenantId == tenantId && u.IsActive)
+            .Where(u => context.UserRoles.Any(ur => ur.UserId == u.Id && roleIds.Contains(ur.RoleId)))
+            .Select(static u => u.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 }

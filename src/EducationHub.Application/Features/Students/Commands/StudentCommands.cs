@@ -1,4 +1,5 @@
 using EducationHub.Application.Common.Helpers;
+using EducationHub.Application.Common.Messaging;
 using EducationHub.Application.Common.Interfaces;
 using EducationHub.Application.Features.Students.DTOs;
 using EducationHub.Application.Features.Students.Services;
@@ -72,12 +73,8 @@ internal static class StudentCommandSupport
 public sealed record CreateStudentCommand(CreateStudentRequest Request) : IRequest<Result<StudentProfileDto>>;
 
 public sealed class CreateStudentCommandHandler(
-    IRepository<StudentProfile> students,
-    IRepository<GradeLevel> grades,
-    IRepository<Branch> branches,
-    ProfileAccountSupport accounts,
-    StudentReadModel readModel,
-    ITenantContext tenantContext,
+    StudentRegistrationService registration,
+    ICurrentUser currentUser,
     IUnitOfWork unitOfWork)
     : IRequestHandler<CreateStudentCommand, Result<StudentProfileDto>>
 {
@@ -87,96 +84,21 @@ public sealed class CreateStudentCommandHandler(
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return await unitOfWork.ExecuteInTransactionAsync(
-            async ct => await CreateAsync(command.Request, ct).ConfigureAwait(false),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<Result<StudentProfileDto>> CreateAsync(
-        CreateStudentRequest request,
-        CancellationToken cancellationToken)
-    {
-        var tenantId = BranchCommandSupport.RequireTenantId(tenantContext);
-        var fullName = Normalize.Required(request.FullName, string.Empty);
-
-        var studentNumber = StudentCommandSupport.NormalizeStudentNumber(request.StudentNumber);
-
-        if (studentNumber is not null
-            && await StudentCommandSupport
-                .StudentNumberTakenAsync(students, tenantId, studentNumber, null, cancellationToken)
-                .ConfigureAwait(false))
+        // Registering the guardian creates (or links) a parent: that is the parents module's
+        // permission, not the students module's.
+        if (command.Request.Guardian is not null && !currentUser.HasPermission(PermissionConstants.ParentsCreate))
         {
             return Result<StudentProfileDto>.Failure(
-                "Students.StudentNumberTaken",
-                $"A student number '{studentNumber}' already exists in this tenant.");
+                "Parents.CreateForbidden",
+                "You do not have permission to register a parent.");
         }
 
-        var referenceFailure = await StudentCommandSupport
-            .CheckReferencesAsync(grades, branches, request.GradeLevelId, request.BranchId, cancellationToken)
-            .ConfigureAwait(false);
+        var result = await unitOfWork.ExecuteInTransactionAsync(
+            async ct => await registration.CreateAsync(command.Request, ct).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
 
-        if (referenceFailure is not null)
-        {
-            return referenceFailure;
-        }
-
-        AccountResolution account;
-
-        if (request.UserId is { } userId)
-        {
-            account = await accounts.LinkAsync(userId, tenantId, "Students", cancellationToken).ConfigureAwait(false);
-
-            if (account.Failure is null
-                && await students.Query.AnyAsync(s => s.UserId == userId, cancellationToken).ConfigureAwait(false))
-            {
-                return Result<StudentProfileDto>.Failure(
-                    "Students.ProfileAlreadyExists",
-                    "This user already has a student profile.");
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(request.AccountEmail))
-        {
-            account = await accounts.CreateAsync(
-                    request.AccountEmail,
-                    request.AccountPassword ?? string.Empty,
-                    fullName,
-                    phoneNumber: null,
-                    RoleNames.Student,
-                    tenantId,
-                    "Students",
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        else
-        {
-            account = AccountResolution.None;
-        }
-
-        if (account.Failure is { } failure)
-        {
-            return failure.ToResult<StudentProfileDto>();
-        }
-
-        var profile = new StudentProfile
-        {
-            TenantId = tenantId,
-            UserId = account.User?.Id,
-            FullName = fullName,
-            StudentNumber = studentNumber,
-            DateOfBirth = request.DateOfBirth,
-            GradeLevelId = request.GradeLevelId,
-            BranchId = request.BranchId,
-            EnrollmentDate = request.EnrollmentDate,
-            Status = StudentStatus.Active,
-            Notes = Normalize.Optional(request.Notes)
-        };
-
-        await students.AddAsync(profile, cancellationToken).ConfigureAwait(false);
-        await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-
-        return Result<StudentProfileDto>.Success(
-            await readModel.BuildStudentAsync(profile, cancellationToken).ConfigureAwait(false),
-            "Student created successfully.");
+        // Only after the registration committed: a rolled-back account must never be announced.
+        return await registration.AnnounceGuardianCredentialsAsync(result, cancellationToken).ConfigureAwait(false);
     }
 }
 

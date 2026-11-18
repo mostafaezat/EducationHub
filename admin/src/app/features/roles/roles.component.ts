@@ -255,10 +255,19 @@ export class RolesComponent implements OnInit {
   protected readonly target = signal<RoleDto | null>(null);
   protected readonly selectedPermissions = signal<string[]>([]);
 
-  protected readonly canCreate = signal(this.auth.hasPermission('Roles.Create'));
-  protected readonly canUpdate = signal(this.auth.hasPermission('Roles.Update'));
-  protected readonly canDelete = signal(this.auth.hasPermission('Roles.Delete'));
-  protected readonly canAssignPermissions = signal(this.auth.hasPermission('Roles.AssignPermissions'));
+  /**
+   * Roles belong to a tenant. The platform administrator (no tenant) sees the platform roles
+   * read-only: they are defined in code and reconciled at startup, not edited here.
+   */
+  private readonly isPlatform = (() => {
+    const tenantId = this.auth.user()?.tenantId;
+    return !tenantId || tenantId === '00000000-0000-0000-0000-000000000000';
+  })();
+
+  protected readonly canCreate = signal(!this.isPlatform && this.auth.hasPermission('Roles.Create'));
+  protected readonly canUpdate = signal(!this.isPlatform && this.auth.hasPermission('Roles.Update'));
+  protected readonly canDelete = signal(!this.isPlatform && this.auth.hasPermission('Roles.Delete'));
+  protected readonly canAssignPermissions = signal(!this.isPlatform && this.auth.hasPermission('Roles.AssignPermissions'));
 
   protected readonly createForm = this.fb.nonNullable.group({
     name: ['', [Validators.required]],

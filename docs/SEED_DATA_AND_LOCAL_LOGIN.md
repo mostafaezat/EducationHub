@@ -31,7 +31,10 @@ update` step.
 | 3 | `AcademicSeeder` | Seeds the academic catalog into the `admin-ui-test` demo tenant — see §4.1. |
 | 4 | `DemoTeacherSeeder` | Seeds that tenant's demo teacher accounts — see §4.2. |
 | 5 | `DemoStudentParentSeeder` | Seeds that tenant's demo student and parent accounts — see §4.4. |
-| 6 | `DevelopmentDataSeeder` | No-op by design — see §4.6. |
+| 6 | `DemoStaffSeeder` | Demo owner / assistant / accountant accounts (`EDUCATIONHUB_DEMO_STAFF_PASSWORD`) and mobile numbers for the demo parents — see §6. |
+| 7 | `DemoOperationsSeeder` | Demo groups, sessions, money and learning data — see §4.6. |
+| 8 | `DemoRegistrationRequestSeeder` | Three pending pre-registration requests — see §4.8. |
+| 9 | `DevelopmentDataSeeder` | No-op by design — see §4.7. |
 
 Everything is written as "ensure this exists", never "insert": restarting repeatedly is
 safe, and a half-completed previous run is repaired instead of compounded.
@@ -208,6 +211,26 @@ The seeder intentionally manufactures no further demo records. The documented de
 API** (tenant creation, user creation), which exercises the same validation, provisioning,
 audit and role-assignment paths a real record takes. Seeding would bypass all four.
 
+### 4.8 Demo pre-registration requests (`DemoRegistrationRequestSeeder`, 2026-11-18)
+
+Runs after `DemoOperationsSeeder` against the `admin-ui-test` tenant (same slug lookup, same
+warn+skip contract) and ensures three `Pending` requests for the staff page
+`/registration-requests`:
+
+| Guardian | Mobile | Student |
+|---|---|---|
+| Ali Hassan (Father) | `01000000101` | Youssef Ali |
+| Mona Adel (Mother) | `01000000102` | Salma Khaled |
+| Demo Parent 1 (Father) | `01000000001` | Demo Student 3 |
+
+The third uses demo parent 1's number, so approving it shows an existing parent being linked
+instead of a new one created. Add-only and idempotent, keyed by mobile + student name: a request
+with that key in any status (or soft-deleted) is never re-created, so an approved or rejected demo
+request stays as it is. No accounts or passwords are created by this seeder. Covered by
+`RegistrationRequestsEndpointTests.The_demo_seeder_adds_three_pending_requests_once`.
+
+The public form of the demo centre is `http://localhost:4200/register/admin-ui-test`.
+
 ### Accounts observed in the local dev database
 
 | Account | Roles | Origin |
@@ -256,6 +279,16 @@ table, including the tenant administrator):
 | Demo student 2 | `student.two@educationhub.local` | as above | Student (tenant `admin-ui-test`) |
 | Demo parent 1 | `parent.one@educationhub.local` | `EDUCATIONHUB_DEMO_PARENT_PASSWORD` at seed time — `Demo#Family123` in the local dev DB (§4.5) | Parent (tenant `admin-ui-test`) |
 | Demo parent 2 | `parent.two@educationhub.local` | as above | Parent (tenant `admin-ui-test`) |
+| Demo owner | `owner.demo@educationhub.local` | `EDUCATIONHUB_DEMO_STAFF_PASSWORD` at seed time — `Demo#Staff123` in the launch profile | TenantOwner (tenant `admin-ui-test`) |
+| Demo assistant | `assistant.demo@educationhub.local` | as above | Assistant (tenant `admin-ui-test`) |
+| Demo accountant | `accountant.demo@educationhub.local` | as above | Accountant (tenant `admin-ui-test`) |
+
+**Sign-in by mobile number (2026-11-18).** The login field accepts an e-mail address or a mobile
+number (`01000000001`, `+201000000001` and `00201000000001` are the same number). A number matches
+the account's own phone or the phone on the parent profile linked to the account, and signs in only
+when exactly one account matches. `DemoStaffSeeder` gives the demo parents' profiles the numbers
+`01000000001` (parent.one) and `01000000002` (parent.two) when they have none, so on an existing dev
+database `parent.one` can sign in with `01000000001` / `Demo#Family123`.
 
 **Prerequisites enforced by the login flow** (`LoginCommand`):
 
@@ -279,3 +312,9 @@ characters are not required.
 **Password recovery** is log-only in development: `POST /api/auth/forgot-password` always
 answers `200` (anti-enumeration) and the reset link/token is written to the API log by
 `LogEmailSender`.
+
+**Password recovery by mobile (2026-11-18).** On the forgot-password page choose *Mobile*, enter
+e.g. `01000000001` (parent.one): with `WhatsApp:Provider = Log` (the Development setting) the
+6-digit code appears in the API log as `WHATSAPP (PasswordReset) to +201000000001`. Enter it with
+the new password on the same page. Each number gets 3 code requests and 3 reset attempts per
+15 minutes. Note that this changes the demo parent's password - the seeders never reset it back.

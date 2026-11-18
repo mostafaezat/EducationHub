@@ -2099,6 +2099,122 @@ namespace EducationHub.Infrastructure.Persistence.Migrations
                     b.ToTable("ParentProfiles", (string)null);
                 });
 
+            modelBuilder.Entity("EducationHub.Domain.Entities.Students.RegistrationRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("BirthDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CreatedStudentProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DeletedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("GradeLevelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("GuardianEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("GuardianName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("GuardianPhone")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("PreferredSubjects")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Relationship")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("School")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SourceIp")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StudentName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UpdatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedStudentProfileId");
+
+                    b.HasIndex("GradeLevelId");
+
+                    b.HasIndex("TenantId", "GuardianPhone")
+                        .HasDatabaseName("IX_RegistrationRequests_TenantId_GuardianPhone");
+
+                    b.HasIndex("TenantId", "GuardianPhone", "StudentName")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RegistrationRequests_Pending_Unique")
+                        .HasFilter("[Status] = 0 AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "Status", "CreatedAt")
+                        .HasDatabaseName("IX_RegistrationRequests_TenantId_Status_CreatedAt");
+
+                    b.ToTable("RegistrationRequests", (string)null);
+                });
+
             modelBuilder.Entity("EducationHub.Domain.Entities.Students.StudentGuardian", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3151,6 +3267,19 @@ namespace EducationHub.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("EducationHub.Domain.Entities.Students.RegistrationRequest", b =>
+                {
+                    b.HasOne("EducationHub.Domain.Entities.Students.StudentProfile", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedStudentProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("EducationHub.Domain.Entities.Academic.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("EducationHub.Domain.Entities.Students.StudentGuardian", b =>
