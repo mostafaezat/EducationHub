@@ -226,3 +226,17 @@ Without a template the text is sent as a free-form message, which Meta accepts o
 
 The password-reset message is business-initiated and outside any conversation window, so in
 production it is only delivered once `PasswordResetTemplate` is approved.
+
+## Audit trail records deletes (2026-11-19)
+
+`AuditSaveChangesInterceptor` writes an `AuditLog` row for every added, modified **and deleted**
+auditable entity. Both kinds of delete are recorded with `Action = Deleted` (never `Updated`):
+
+- **Hard delete** (the row is removed, e.g. a custom role): `OldValue` holds the row's last known
+  state (sensitive columns redacted), `NewValue` is empty.
+- **Soft delete** (`IsDeleted` set to true, e.g. a student or a file): `OldValue`/`NewValue` hold the
+  changed columns (`IsDeleted`, `DeletedAt`, `DeletedById`).
+
+Every `Deleted` row also carries the entity's key values (`Id`, or each column of a composite
+key) and `EntityId`, so `GET /api/audit/logs?action=Deleted&entityName=…&entityId=…` finds it.
+Covered by `AuditDeleteTests`.

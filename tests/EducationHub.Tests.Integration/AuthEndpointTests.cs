@@ -129,6 +129,66 @@ public sealed class AuthEndpointTests(ApiTestFixture fixture)
     }
 
     [Fact]
+    public async Task Refresh_does_not_spend_the_login_budget()
+    {
+        // QA-01: refresh shared the login limiter, so a few colleagues behind one router used
+        // it up and their sessions ended. With a login budget of 2, one sign-in plus several
+        // consecutive refreshes from the same IP must all succeed.
+        var (factory, client) = fixture.CreateRateLimitedHost(permitLimit: 2);
+
+        try
+        {
+            var session = await ApiScenarios.LoginAsync(client, ApiTestFixture.AdminEmail, ApiTestFixture.AdminPassword);
+            var refreshToken = session.RefreshToken;
+
+            for (var i = 0; i < 6; i++)
+            {
+                using var refreshed = await client.PostJsonAsync("/api/auth/refresh", new { refreshToken });
+                Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+                refreshToken = (await refreshed.ReadJsonAsync()).GetProperty("data").GetProperty("refreshToken").GetString()!;
+            }
+        }
+        finally
+        {
+            client.Dispose();
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_refreshes_with_one_token_let_exactly_one_through()
+    {
+        // QA-04: the rotation was read-check-write, so parallel calls with the same token all
+        // got new sessions and reuse detection never saw it.
+        var session = await ApiScenarios.LoginAsync(Client, ApiTestFixture.AdminEmail, ApiTestFixture.AdminPassword);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
+            Client.PostJsonAsync("/api/auth/refresh", new { refreshToken = session.RefreshToken })));
+
+        try
+        {
+            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+            Assert.All(
+                responses.Where(r => r.StatusCode != HttpStatusCode.OK),
+                r => Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode));
+
+            // The presented token is spent for good. (Whether the winner's new token survives
+            // depends on timing: a duplicate that arrives after the winner committed is a
+            // replay of a rotated token, which revokes the family by design.)
+            using var replay = await Client.PostJsonAsync("/api/auth/refresh", new { refreshToken = session.RefreshToken });
+            Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Change_password_revokes_sessions_and_replaces_the_credential()
     {
         var (tenant, token) = await NewTenantAsync("change");

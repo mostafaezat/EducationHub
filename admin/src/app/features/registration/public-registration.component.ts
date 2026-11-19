@@ -344,12 +344,26 @@ type PageState = 'loading' | 'form' | 'done' | 'notFound' | 'loadFailed';
       .big.ok {
         color: #16a34a;
       }
+      /* Visually hidden in place. Never moved with an offset: left: -10000px widened the page by
+         10,000px in RTL (Arabic, the default) - QA-03. Anchored to the form so it always sits
+         inside the form's own box. */
+      form {
+        position: relative;
+      }
       .hp {
         position: absolute;
-        left: -10000px;
+        inset-block-start: 0;
+        inset-inline-start: 0;
         width: 1px;
         height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
         overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
       }
       :host ::ng-deep .w-full {
         width: 100%;

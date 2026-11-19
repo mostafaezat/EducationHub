@@ -1,4 +1,4 @@
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
@@ -88,8 +88,8 @@ describe('authInterceptor', () => {
     expect(body).toEqual({ ok: true });
   });
 
-  it('surfaces the original 401 when the refresh itself fails', () => {
-    auth.refreshResult = () => throwError(() => new Error('refresh failed'));
+  it('surfaces the original 401 when the server rejects the refresh token', () => {
+    auth.refreshResult = () => throwError(() => new HttpErrorResponse({ status: 400, statusText: 'Bad Request' }));
     let status = 0;
 
     http.get('/api/users').subscribe({ error: (e) => (status = e.status) });
@@ -98,6 +98,18 @@ describe('authInterceptor', () => {
 
     expect(auth.refreshCalls).toBe(1);
     expect(status).toBe(401);
+  });
+
+  it('surfaces a rate-limited refresh as 429, not as a session-ending 401 (QA-01)', () => {
+    auth.refreshResult = () => throwError(() => new HttpErrorResponse({ status: 429, statusText: 'Too Many Requests' }));
+    let status = 0;
+
+    http.get('/api/users').subscribe({ error: (e) => (status = e.status) });
+
+    backend.expectOne('/api/users').flush({}, { status: 401, statusText: 'Unauthorized' });
+
+    expect(auth.refreshCalls).toBe(1);
+    expect(status).toBe(429);
   });
 
   it('does not refresh on errors other than 401', () => {

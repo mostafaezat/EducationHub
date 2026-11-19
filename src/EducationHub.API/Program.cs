@@ -197,6 +197,16 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { Window = limits.Window, PermitLimit = limits.PermitLimit, QueueLimit = 0 });
     });
 
+    // Token refresh, per remote IP: its own generous budget, never the login one (QA-01).
+    options.AddPolicy(RateLimitPolicies.Refresh, httpContext =>
+    {
+        var limits = httpContext.RequestServices.GetRequiredService<IOptions<AuthRateLimitOptions>>().Value.Refresh;
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { Window = limits.Window, PermitLimit = limits.PermitLimit, QueueLimit = 0 });
+    });
+
     // Anonymous pre-registration form, per remote IP.
     options.AddPolicy(PublicRegistrationRateLimitPolicy, httpContext =>
     {

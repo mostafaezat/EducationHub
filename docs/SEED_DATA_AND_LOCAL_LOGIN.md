@@ -295,8 +295,15 @@ database `parent.one` can sign in with `01000000001` / `Demo#Family123`.
 - Email must be confirmed, account must be active, tenant (if any) must be active and in
   subscription — otherwise `403 Account.EmailNotConfirmed` / `Account.Inactive` / etc.
 - 5 consecutive failures lock the account for 15 minutes.
-- Credential endpoints are rate-limited per IP (`auth-credential`): bursts answer `429`
-  with `Retry-After: 60`.
+- Credential endpoints (login, forgot/reset password) are rate-limited per IP
+  (`auth-credential`, `Auth:RateLimit:PermitLimit`/`Window`, default 5 per 5 minutes): bursts
+  answer `429` with `Retry-After: 60`.
+- Token refresh has its own, generous per-IP limit (`auth-refresh`,
+  `Auth:RateLimit:Refresh`, default 60 per minute) and never spends the login budget, so
+  colleagues behind one router are not signed out. Refresh-token rotation is atomic: of several
+  concurrent refreshes with the same token exactly one succeeds. The admin app sends one refresh
+  for all parallel requests and ends the session only when the server rejects the refresh token
+  (400/401), never on a 429 or a network error (QA report 2026-11-18, QA-01/QA-04).
 
 **Platform administrator scope (2026-11-04).** The `PlatformAdmin` role holds only the platform
 areas (`PermissionConstants.PlatformAreaNames`: Auth, Platform, Users, Roles, Permissions, Tenants,

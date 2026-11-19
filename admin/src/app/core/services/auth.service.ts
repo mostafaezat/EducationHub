@@ -1,6 +1,6 @@
 import { HttpErrorResponse, HttpClient } from '@angular/common/http';
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { catchError, map, Observable, of, switchMap, tap } from 'rxjs';
+import { catchError, finalize, map, Observable, of, shareReplay, switchMap, tap, throwError } from 'rxjs';
 import {
   ACCESS_EXPIRY_KEY,
   ACCESS_TOKEN_KEY,
@@ -29,6 +29,9 @@ import {
 export class AuthService {
   private readonly http = inject(HttpClient);
 
+  /** The refresh request currently on the wire, shared by every caller until it settles. */
+  private refreshInFlight: Observable<void> | null = null;
+
   private readonly userSignal = signal<UserProfileDto | null>(this.readStoredUser());
   readonly user = this.userSignal.asReadonly();
 
@@ -49,6 +52,11 @@ export class AuthService {
       );
   }
 
+  /**
+   * Exchanges the refresh token for a new pair. Parallel callers share ONE request: every API
+   * call of a page that loads after the access token expired asks for a refresh at once, and the
+   * server rotates the token on first use, so sending it N times would fail N-1 of them (QA-01).
+   */
   refreshToken(): Observable<void> {
     const refreshToken = this.getRefreshToken();
 
@@ -56,15 +64,37 @@ export class AuthService {
       return of(undefined);
     }
 
-    return this.http
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+
+    this.refreshInFlight = this.http
       .post<Result<AuthResponse>>(`${API_BASE_URL}/api/auth/refresh`, {
         refreshToken
       } satisfies RefreshTokenRequest)
       .pipe(
         map((result) => result.data as AuthResponse),
         tap((auth) => this.storeSession(auth)),
-        map(() => undefined)
+        map(() => undefined),
+        // Another tab of this browser may have rotated the same token a moment earlier; its new
+        // pair is already in localStorage, so adopt it instead of failing this tab.
+        catchError((error: unknown) =>
+          this.getRefreshToken() && this.getRefreshToken() !== refreshToken ? of(undefined) : throwError(() => error)
+        ),
+        finalize(() => (this.refreshInFlight = null)),
+        shareReplay({ bufferSize: 1, refCount: false })
       );
+
+    return this.refreshInFlight;
+  }
+
+  /**
+   * True when the server rejected the refresh token itself (expired, revoked, reused): the
+   * session is over. A 429, a network error or a 5xx says nothing about the session and must not
+   * sign the user out.
+   */
+  static isSessionRejected(error: unknown): boolean {
+    return error instanceof HttpErrorResponse && (error.status === 400 || error.status === 401);
   }
 
   loadProfile(): Observable<UserProfileDto> {
@@ -160,9 +190,15 @@ export class AuthService {
 
     return this.refreshToken().pipe(
       map(() => true),
-      catchError(() => {
-        this.clearSession();
-        return of(false);
+      catchError((error: unknown) => {
+        if (AuthService.isSessionRejected(error)) {
+          this.clearSession();
+          return of(false);
+        }
+
+        // Transient failure (rate limit, network, server): keep the session and let the caller
+        // see this error instead of a 401 that would end it.
+        return throwError(() => error);
       })
     );
   }

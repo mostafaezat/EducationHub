@@ -79,6 +79,16 @@ public interface IAuthenticationRepository
     /// </summary>
     Task<IReadOnlyList<RefreshToken>> GetTokenFamilyAsync(Guid familyId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Atomically marks a still-live token as rotated to <paramref name="replacedByTokenId"/>, in
+    /// the database, at once. Returns false when another request revoked or rotated it first, so
+    /// of several concurrent refreshes with one token exactly one can succeed.
+    /// </summary>
+    Task<bool> TryClaimRefreshTokenAsync(
+        Guid tokenId,
+        Guid replacedByTokenId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Revokes a single token and optionally links it to its replacement.</summary>
     Task RevokeRefreshTokenAsync(
         RefreshToken token,

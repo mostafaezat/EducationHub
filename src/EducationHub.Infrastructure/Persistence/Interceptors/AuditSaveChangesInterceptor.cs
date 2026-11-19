@@ -9,8 +9,9 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 namespace EducationHub.Infrastructure.Persistence.Interceptors;
 
 /// <summary>
-/// Writes an <see cref="AuditLog"/> row for every entity added or modified in a unit of
-/// work.
+/// Writes an <see cref="AuditLog"/> row for every entity added, modified or deleted in a unit
+/// of work. Hard deletes and soft deletes (<c>IsDeleted</c> set to true) are both recorded as
+/// <see cref="AuditAction.Deleted"/> with the row's key values.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -60,7 +61,7 @@ public sealed class AuditSaveChangesInterceptor(
 
         var entries = context.ChangeTracker
             .Entries()
-            .Where(static e => e.State is EntityState.Added or EntityState.Modified)
+            .Where(static e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Where(static e => e.Entity is IAuditableEntity)
             .Where(static e => e.Entity is not AuditLog)
             .ToArray();
@@ -76,6 +77,12 @@ public sealed class AuditSaveChangesInterceptor(
         {
             var isInsert = entry.State == EntityState.Added;
 
+            // A hard delete, or a soft delete (IsDeleted flipped to true), is recorded as
+            // "Deleted" - never as an update - with the row's key values, so the audit trail
+            // says what disappeared even when the row itself is gone.
+            var isDelete = entry.State == EntityState.Deleted || IsSoftDelete(entry);
+            var action = isInsert ? AuditAction.Created : isDelete ? AuditAction.Deleted : AuditAction.Updated;
+
             // Sign-in writes (login history, refresh tokens, last-login stamps) happen before
             // the request is authenticated, so there is no caller yet: the row's own user is
             // the actor.
@@ -90,13 +97,13 @@ public sealed class AuditSaveChangesInterceptor(
                 TenantId = requestTenantId ?? ReadGuid(entry, "TenantId") ?? Guid.Empty,
                 UserId = actorId,
                 UserName = currentUser.UserName,
-                Action = isInsert ? AuditAction.Created : AuditAction.Updated,
+                Action = action,
                 EntityName = entry.Metadata.ClrType.Name,
                 EntityId = GetEntityId(entry),
                 CorrelationId = diagnostics.CorrelationId,
                 IpAddress = currentUser.IpAddress,
-                OldValue = isInsert ? null : SerializeChanges(entry, originalValues: true),
-                NewValue = SerializeChanges(entry, originalValues: false),
+                OldValue = isInsert ? null : SerializeChanges(entry, originalValues: true, includeKeys: isDelete),
+                NewValue = entry.State == EntityState.Deleted ? null : SerializeChanges(entry, originalValues: false, includeKeys: isDelete),
                 OccurredAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
                 CreatedById = actorId
@@ -130,9 +137,25 @@ public sealed class AuditSaveChangesInterceptor(
         return idProperty?.ToString();
     }
 
-    private static string? SerializeChanges(EntityEntry entry, bool originalValues)
+    /// <summary>True when this save flips a soft-deletable row's <c>IsDeleted</c> from false to true.</summary>
+    private static bool IsSoftDelete(EntityEntry entry)
+    {
+        if (entry.State != EntityState.Modified || entry.Entity is not ISoftDeletableEntity)
+        {
+            return false;
+        }
+
+        var flag = entry.Property(nameof(ISoftDeletableEntity.IsDeleted));
+
+        return flag.CurrentValue is true && flag.OriginalValue is false;
+    }
+
+    private static string? SerializeChanges(EntityEntry entry, bool originalValues, bool includeKeys = false)
     {
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        // A hard-deleted row keeps no current state, so its whole last known state is recorded.
+        var wholeRow = originalValues && entry.State == EntityState.Deleted;
 
         foreach (var property in entry.Properties)
         {
@@ -145,6 +168,14 @@ public sealed class AuditSaveChangesInterceptor(
             var original = property.OriginalValue;
 
             var changed = !Equals(current, original);
+
+            // Deletes always carry the key values (Id, and composite keys of join rows), so the
+            // removed row can be identified from the audit trail alone.
+            if (wholeRow || (includeKeys && property.Metadata.IsKey()))
+            {
+                changes[property.Metadata.Name] = originalValues ? original : current;
+                continue;
+            }
 
             if (originalValues)
             {

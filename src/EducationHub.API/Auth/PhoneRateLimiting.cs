@@ -13,6 +13,14 @@ namespace EducationHub.API.Auth;
 public static class RateLimitPolicies
 {
     public const string PhoneReset = "auth-phone-reset";
+
+    /// <summary>
+    /// Token refresh, per remote IP. Separate from the credential limiter on purpose: a refresh
+    /// token is a 256-bit random value, not a guessable credential, and every signed-in user of a
+    /// centre behind one router refreshes every 15 minutes - sharing the login budget logged
+    /// them out (QA-01).
+    /// </summary>
+    public const string Refresh = "auth-refresh";
     public const string PublicRegistration = "public-registration";
 }
 

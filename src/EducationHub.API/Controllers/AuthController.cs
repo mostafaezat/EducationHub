@@ -48,7 +48,7 @@ public sealed class AuthController(IMediator mediator) : ControllerBase
     /// </remarks>
     [HttpPost("refresh")]
     [AllowAnonymous]
-    [EnableRateLimiting("auth-credential")]
+    [EnableRateLimiting(RateLimitPolicies.Refresh)]
     [ProducesResponseType(typeof(Result<AuthResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]

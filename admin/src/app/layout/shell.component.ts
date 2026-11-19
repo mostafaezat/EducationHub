@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
 import { AvatarModule } from 'primeng/avatar';
 import { ButtonModule } from 'primeng/button';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
@@ -31,8 +33,11 @@ import { NotificationBellComponent } from './notification-bell.component';
     <p-toast position="top-right" />
     <p-confirmDialog />
 
-    <div class="shell" [class.sidebar-collapsed]="collapsed()">
-      <aside class="sidebar">
+    <div class="shell" [class.sidebar-collapsed]="collapsed()" [class.mobile-menu-open]="mobileMenuOpen()">
+      @if (mobileMenuOpen()) {
+        <div class="backdrop" (click)="mobileMenuOpen.set(false)" aria-hidden="true"></div>
+      }
+      <aside class="sidebar" [attr.id]="'app-sidebar'">
         <div class="brand">
           <i class="pi pi-graduation-cap"></i>
           @if (!collapsed()) {
@@ -76,6 +81,16 @@ import { NotificationBellComponent } from './notification-bell.component';
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
+            <button
+              type="button"
+              class="menu-toggle"
+              aria-controls="app-sidebar"
+              [attr.aria-expanded]="mobileMenuOpen()"
+              [attr.aria-label]="mobileMenuOpen() ? t('shell.closeMenu') : t('shell.openMenu')"
+              (click)="toggleMobileMenu()"
+            >
+              <i class="pi" [class.pi-bars]="!mobileMenuOpen()" [class.pi-times]="mobileMenuOpen()"></i>
+            </button>
             <span class="app-title">{{ t('shell.adminConsole') }}</span>
             @if (user(); as current) {
               <p-tag [value]="roleLabel(current.roles)" severity="info" />
@@ -283,6 +298,79 @@ import { NotificationBellComponent } from './notification-bell.component';
         flex: 1;
         overflow: auto;
       }
+      .menu-toggle {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 2.4rem;
+        height: 2.4rem;
+        border: 1px solid #d3dbe7;
+        border-radius: 8px;
+        background: #fff;
+        color: #10233f;
+        cursor: pointer;
+      }
+      .backdrop {
+        display: none;
+      }
+
+      /* Phones and small tablets (QA-02): the sidebar becomes an off-canvas drawer opened from
+         the top bar, so the page gets the full width. */
+      @media (max-width: 900px) {
+        .sidebar,
+        .sidebar-collapsed .sidebar {
+          position: fixed;
+          inset-block: 0;
+          inset-inline-start: 0;
+          width: min(280px, 85vw);
+          z-index: 1100;
+          transform: translateX(-100%);
+          transition: transform 0.2s ease;
+          box-shadow: none;
+        }
+        :host-context([dir='rtl']) .sidebar {
+          transform: translateX(100%);
+        }
+        .mobile-menu-open .sidebar,
+        :host-context([dir='rtl']) .mobile-menu-open .sidebar {
+          transform: none;
+          box-shadow: 0 0 24px rgba(16, 35, 63, 0.35);
+        }
+        .collapse-toggle {
+          display: none;
+        }
+        .backdrop {
+          display: block;
+          position: fixed;
+          inset: 0;
+          z-index: 1050;
+          background: rgba(16, 35, 63, 0.45);
+        }
+        .menu-toggle {
+          display: inline-flex;
+        }
+        .topbar {
+          padding: 0.6rem 0.75rem;
+          gap: 0.5rem;
+        }
+        .topbar-left,
+        .topbar-right {
+          gap: 0.5rem;
+          min-width: 0;
+        }
+        .topbar-right {
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+        .tenant-hint,
+        .user-meta {
+          display: none;
+        }
+        .content {
+          padding: 1rem 0.75rem;
+          overflow: visible;
+        }
+      }
     `
   ]
 })
@@ -293,6 +381,9 @@ export class ShellComponent {
   private readonly router = inject(Router);
 
   protected readonly collapsed = signal(false);
+
+  /** The off-canvas menu on narrow screens (below 900px); unused on desktop. */
+  protected readonly mobileMenuOpen = signal(false);
   protected readonly languages = SUPPORTED_LANGUAGES;
   protected readonly user = this.auth.user;
 
@@ -315,6 +406,20 @@ export class ShellComponent {
 
   constructor() {
     this.auth.applyStoredLanguage();
+
+    // Picking a page in the drawer closes it.
+    this.router.events
+      .pipe(
+        filter((event) => event instanceof NavigationEnd),
+        takeUntilDestroyed()
+      )
+      .subscribe(() => this.mobileMenuOpen.set(false));
+  }
+
+  protected toggleMobileMenu(): void {
+    // The drawer always shows the labels, whatever the desktop collapse state is.
+    this.collapsed.set(false);
+    this.mobileMenuOpen.update((open) => !open);
   }
 
   protected setLanguage(code: string): void {

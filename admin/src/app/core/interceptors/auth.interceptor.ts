@@ -53,9 +53,14 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
             return throwError(() => error);
           }
 
+          // A rejected refresh token surfaces the original 401 (the session is over). A transient
+          // refresh failure (429, network) surfaces itself instead, so the error interceptor does
+          // not end a session that is still valid (QA-01).
           return auth.refreshToken().pipe(
             switchMap(() => send(true)),
-            catchError(() => throwError(() => error))
+            catchError((refreshError: unknown) =>
+              throwError(() => (AuthService.isSessionRejected(refreshError) ? error : refreshError))
+            )
           );
         })
       );

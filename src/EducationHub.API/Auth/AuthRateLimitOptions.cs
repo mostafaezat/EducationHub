@@ -1,7 +1,7 @@
 namespace EducationHub.API.Auth;
 
 /// <summary>
-/// Options for the credential-entry rate limiter (login / refresh). Bound from the
+/// Options for the credential-entry rate limiter (login, forgot/reset password). Bound from the
 /// <c>Auth:RateLimit</c> section; intended as a coarse, in-memory per-IP guard on top of the
 /// per-account lockout, so values are deliberately conservative for shared-NAT deployments.
 /// </summary>
@@ -20,6 +20,12 @@ public sealed class AuthRateLimitOptions
 
     /// <summary>Anonymous pre-registration requests (<c>Auth:RateLimit:PublicRegistration</c>).</summary>
     public WindowRateLimitOptions PublicRegistration { get; set; } = new() { PermitLimit = 5, Window = TimeSpan.FromHours(1) };
+
+    /// <summary>
+    /// Token refresh (<c>Auth:RateLimit:Refresh</c>), per remote IP. Generous: it only has to stop
+    /// a flood, since refresh tokens cannot be guessed and reuse is detected per token chain.
+    /// </summary>
+    public WindowRateLimitOptions Refresh { get; set; } = new() { PermitLimit = 60, Window = TimeSpan.FromMinutes(1) };
 }
 
 /// <summary>A fixed window: at most <see cref="PermitLimit"/> requests per <see cref="Window"/>.</summary>

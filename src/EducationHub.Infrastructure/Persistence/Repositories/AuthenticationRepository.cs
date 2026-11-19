@@ -188,6 +188,31 @@ public sealed class AuthenticationRepository(EducationHubDbContext context) : IA
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+    public async Task<bool> TryClaimRefreshTokenAsync(
+        Guid tokenId,
+        Guid replacedByTokenId,
+        CancellationToken cancellationToken = default)
+    {
+        // A single conditional UPDATE: SQL Server takes the row lock for the WHERE and the SET
+        // together, so two concurrent calls cannot both see RevokedAt IS NULL. The tracked
+        // entity is not touched here; the caller then saves it with the same values through
+        // RevokeRefreshTokenAsync, which is also what writes the audit row.
+        var now = DateTime.UtcNow;
+
+        var affected = await context.RefreshTokens
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == tokenId && t.RevokedAt == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(t => t.RevokedAt, now)
+                    .SetProperty(t => t.RevokedReason, "Rotated")
+                    .SetProperty(t => t.ReplacedByTokenId, replacedByTokenId),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return affected == 1;
+    }
+
     public async Task RevokeRefreshTokenAsync(
         RefreshToken token,
         string reason,

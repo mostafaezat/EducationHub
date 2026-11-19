@@ -158,10 +158,28 @@ public sealed class RefreshTokenCommandHandler(
             CreatedByIp = currentUser.IpAddress
         };
 
+        // Claim the presented token atomically before issuing anything. Everything above is a
+        // read-check, so two concurrent calls with the same token both pass it; only one of them
+        // may win the conditional update, otherwise a stolen token raced against the real client
+        // yields a second valid session that reuse detection never sees (QA-04). The loser gets
+        // nothing and the family is left alone: it is a race, not a later replay, and the
+        // winner's session (e.g. another browser tab of the same user) stays valid.
+        var claimed = await authentication
+            .TryClaimRefreshTokenAsync(stored.Id, replacement.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!claimed)
+        {
+            throw new BusinessRuleException(
+                "Auth.InvalidRefreshToken",
+                "This refresh token was already used by another request.");
+        }
+
         await refreshTokens.AddAsync(replacement, cancellationToken).ConfigureAwait(false);
 
         // Revoking the presented token and linking it to the replacement is what turns the
-        // next presentation of it into a detectable reuse.
+        // next presentation of it into a detectable reuse. The row is already claimed above;
+        // this writes the same values through the tracked entity and saves the replacement.
         await authentication
             .RevokeRefreshTokenAsync(
                 stored,
