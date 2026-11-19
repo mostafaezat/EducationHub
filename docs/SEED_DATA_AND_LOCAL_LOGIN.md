@@ -221,10 +221,13 @@ warn+skip contract) and ensures three `Pending` requests for the staff page
 |---|---|---|
 | Ali Hassan (Father) | `01000000101` | Youssef Ali |
 | Mona Adel (Mother) | `01000000102` | Salma Khaled |
-| Demo Parent 1 (Father) | `01000000001` | Demo Student 3 |
+| Demo Parent 1 (Father) | `01000000201` | Demo Student 3 |
 
-The third uses demo parent 1's number, so approving it shows an existing parent being linked
-instead of a new one created. Add-only and idempotent, keyed by mobile + student name: a request
+The third uses parent.one's own mobile (`01000000201`), so approving it shows an existing parent being
+linked instead of a new one created. A database seeded before 2026-11-19 holds this request with
+`01000000001` (which belongs to the account-less profile "Hassan Ali"); while it is still pending the
+seeder moves it to `01000000201` instead of adding a second copy. Add-only and idempotent otherwise,
+keyed by mobile + student name: a request
 with that key in any status (or soft-deleted) is never re-created, so an approved or rejected demo
 request stays as it is. No accounts or passwords are created by this seeder. Covered by
 `RegistrationRequestsEndpointTests.The_demo_seeder_adds_three_pending_requests_once`.
@@ -287,17 +290,23 @@ table, including the tenant administrator):
 number (`01000000001`, `+201000000001` and `00201000000001` are the same number). A number matches
 the account's own phone or the phone on the parent profile linked to the account, and signs in only
 when exactly one account matches. `DemoStaffSeeder` gives the demo parents' profiles the numbers
-`01000000001` (parent.one) and `01000000002` (parent.two) when they have none, so on an existing dev
-database `parent.one` can sign in with `01000000001` / `Demo#Family123`.
+`01000000201` (parent.one) and `01000000202` (parent.two) when they have none and the number is
+free, so after the next start-up of an existing dev database `parent.one` signs in with
+`01000000201` / `Demo#Family123` and `parent.two` with `01000000202`. (Until 2026-11-19 the seeder
+used `01000000001`/`02`, which `DemoOperationsSeeder` had already given to the account-less profiles
+"Hassan Ali"/"Adel Mansour", so the demo parents got no number - QA-07. The numbers handed out by
+the demo seeders are now checked to be disjoint by `DemoSeedPhoneNumberTests`.)
 
 **Prerequisites enforced by the login flow** (`LoginCommand`):
 
 - Email must be confirmed, account must be active, tenant (if any) must be active and in
   subscription — otherwise `403 Account.EmailNotConfirmed` / `Account.Inactive` / etc.
 - 5 consecutive failures lock the account for 15 minutes.
-- Credential endpoints (login, forgot/reset password) are rate-limited per IP
-  (`auth-credential`, `Auth:RateLimit:PermitLimit`/`Window`, default 5 per 5 minutes): bursts
-  answer `429` with `Retry-After: 60`.
+- Credential endpoints (login, forgot password, resend confirmation) are rate-limited per IP **and
+  login name** (`Auth:RateLimit:PermitLimit`/`Window`, default 5 per 5 minutes), so colleagues behind
+  one router do not block each other; a looser per-IP backstop (`auth-credential` policy,
+  `Auth:RateLimit:PerIp`, default 30 per 5 minutes) stops trying many names from one address.
+  Bursts answer `429` with `Retry-After` = the real time left in the window.
 - Token refresh has its own, generous per-IP limit (`auth-refresh`,
   `Auth:RateLimit:Refresh`, default 60 per minute) and never spends the login budget, so
   colleagues behind one router are not signed out. Refresh-token rotation is atomic: of several
@@ -321,7 +330,7 @@ answers `200` (anti-enumeration) and the reset link/token is written to the API 
 `LogEmailSender`.
 
 **Password recovery by mobile (2026-11-18).** On the forgot-password page choose *Mobile*, enter
-e.g. `01000000001` (parent.one): with `WhatsApp:Provider = Log` (the Development setting) the
-6-digit code appears in the API log as `WHATSAPP (PasswordReset) to +201000000001`. Enter it with
+e.g. `01000000201` (parent.one): with `WhatsApp:Provider = Log` (the Development setting) the
+6-digit code appears in the API log as `WHATSAPP (PasswordReset) to +201000000201`. Enter it with
 the new password on the same page. Each number gets 3 code requests and 3 reset attempts per
 15 minutes. Note that this changes the demo parent's password - the seeders never reset it back.

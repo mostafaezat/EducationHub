@@ -50,6 +50,13 @@ public sealed class DemoOperationsSeeder(
         "Hassan Ali", "Adel Mansour", "Kamal Youssef", "Mahmoud Saad", "Khaled Omar", "Samir Nabil"
     ];
 
+    /// <summary>
+    /// The mobile numbers of the account-less demo parent profiles (01000000001 ... 01000000006).
+    /// Other demo seeders must not hand these out again: see DemoStaffSeeder.DemoParentPhones.
+    /// </summary>
+    public static IReadOnlyList<string> DemoParentProfilePhones { get; } =
+        [.. Enumerable.Range(0, ParentNames.Length).Select(static p => $"0100000{p + 1:D4}")];
+
     public Task SeedAsync(CancellationToken cancellationToken = default)
         => SeedAsync(AcademicSeeder.DemoTenantSlug, DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken);
 
@@ -184,7 +191,7 @@ public sealed class DemoOperationsSeeder(
                 TenantId = tenantId,
                 FullName = ParentNames[p],
                 Email = email,
-                PhoneNumber = $"0100000{p + 1:D4}"
+                PhoneNumber = DemoParentProfilePhones[p]
             };
 
             context.ParentProfiles.Add(parent);

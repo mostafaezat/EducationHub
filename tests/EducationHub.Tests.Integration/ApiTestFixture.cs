@@ -66,6 +66,7 @@ public sealed class ApiTestFixture : IAsyncLifetime
         SetEnvironment("EDUCATIONHUB_ADMIN_EMAIL", AdminEmail);
         SetEnvironment("EDUCATIONHUB_ADMIN_PASSWORD", AdminPassword);
         SetEnvironment("Auth__RateLimit__PermitLimit", "10000");
+        SetEnvironment("Auth__RateLimit__PerIp__PermitLimit", "10000");
         SetEnvironment("Auth__RateLimit__PhoneReset__PermitLimit", "10000");
         SetEnvironment("Auth__RateLimit__PublicRegistration__PermitLimit", "10000");
         SetEnvironment("Auth__Email__FrontendBaseUrl", "https://portal.test");
@@ -167,12 +168,19 @@ public sealed class ApiTestFixture : IAsyncLifetime
     /// any earlier would let the host pick up the collection-wide ceiling instead.
     /// </remarks>
     internal (ApiWebApplicationFactory Factory, HttpClient Client) CreateRateLimitedHost(int permitLimit)
-    {
-        var previous = Environment.GetEnvironmentVariable("Auth__RateLimit__PermitLimit");
+        => CreateRateLimitedHost(("Auth__RateLimit__PermitLimit", permitLimit));
 
-        Environment.SetEnvironmentVariable(
-            "Auth__RateLimit__PermitLimit",
-            permitLimit.ToString(CultureInfo.InvariantCulture));
+    /// <summary>A second host with the given limits (environment variable name, value).</summary>
+    internal (ApiWebApplicationFactory Factory, HttpClient Client) CreateRateLimitedHost(params (string Variable, int Value)[] limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+
+        var previous = limits.ToDictionary(static l => l.Variable, static l => Environment.GetEnvironmentVariable(l.Variable));
+
+        foreach (var (variable, value) in limits)
+        {
+            Environment.SetEnvironmentVariable(variable, value.ToString(CultureInfo.InvariantCulture));
+        }
 
         try
         {
@@ -188,7 +196,10 @@ public sealed class ApiTestFixture : IAsyncLifetime
         }
         finally
         {
-            Environment.SetEnvironmentVariable("Auth__RateLimit__PermitLimit", previous);
+            foreach (var (variable, value) in previous)
+            {
+                Environment.SetEnvironmentVariable(variable, value);
+            }
         }
     }
 

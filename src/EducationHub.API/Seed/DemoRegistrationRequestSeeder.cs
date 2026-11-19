@@ -26,8 +26,53 @@ public sealed class DemoRegistrationRequestSeeder(
     [
         ("Ali Hassan", "01000000101", GuardianRelationship.Father, "Youssef Ali", "Prefers evening groups."),
         ("Mona Adel", "01000000102", GuardianRelationship.Mother, "Salma Khaled", null),
-        ("Demo Parent 1", "01000000001", GuardianRelationship.Father, "Demo Student 3", "Sibling of a current student.")
+        // parent.one's own mobile (DemoStaffSeeder.DemoParentPhones), so approving this request
+        // shows the "link the existing parent" path.
+        ("Demo Parent 1", "01000000201", GuardianRelationship.Father, "Demo Student 3", "Sibling of a current student.")
     ];
+
+    /// <summary>The number the "Demo Parent 1" request used before 2026-11-19 (it belongs to another demo profile).</summary>
+    private const string LegacyDemoParentPhone = "01000000001";
+
+    /// <summary>
+    /// Databases seeded before 2026-11-19 hold the "Demo Parent 1 / Demo Student 3" request with
+    /// 01000000001, which is the account-less profile "Hassan Ali", not parent.one (QA-07). While
+    /// that request is still pending it is moved to parent.one's number instead of adding a
+    /// second copy; a reviewed one is history and is left alone.
+    /// </summary>
+    private async Task RepointLegacyDemoParentRequestAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var (guardian, rawPhone, _, student, _) = DemoRequests[^1];
+        var legacy = PhoneNumberFormat.ToCanonical(LegacyDemoParentPhone)!;
+        var current = PhoneNumberFormat.ToCanonical(rawPhone)!;
+
+        var request = await context.RegistrationRequests
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                r => r.TenantId == tenantId && !r.IsDeleted && r.Status == RegistrationRequestStatus.Pending
+                    && r.GuardianName == guardian && r.StudentName == student && r.GuardianPhone == legacy,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (request is null)
+        {
+            return;
+        }
+
+        var alreadyThere = await context.RegistrationRequests
+            .IgnoreQueryFilters()
+            .AnyAsync(r => r.TenantId == tenantId && r.GuardianPhone == current && r.StudentName == student, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (alreadyThere)
+        {
+            return;
+        }
+
+        request.GuardianPhone = current;
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("Demo request {Student} now uses parent.one's mobile {Phone}.", student, rawPhone);
+    }
 
     public Task<int> SeedAsync(CancellationToken cancellationToken = default)
         => SeedAsync(AcademicSeeder.DemoTenantSlug, cancellationToken);
@@ -53,6 +98,8 @@ public sealed class DemoRegistrationRequestSeeder(
             .Select(static g => (Guid?)g.Id)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        await RepointLegacyDemoParentRequestAsync(tenant.Id, cancellationToken).ConfigureAwait(false);
 
         var added = 0;
         var age = 0;

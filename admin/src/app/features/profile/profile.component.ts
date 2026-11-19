@@ -1,12 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { catchError, of } from 'rxjs';
 import { TranslateService } from '../../core/i18n/translate.service';
 import { PermissionAreaDto } from '../../core/models';
-import { RolesService } from '../../core/services/roles.service';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
@@ -128,25 +126,22 @@ import { AuthService } from '../../core/services/auth.service';
 export class ProfileComponent {
   protected readonly t = inject(TranslateService).t;
   private readonly auth = inject(AuthService);
-  private readonly roles = inject(RolesService);
 
   protected readonly user = this.auth.user;
-  protected readonly areas = signal<PermissionAreaDto[]>([]);
 
-  constructor() {
-    this.roles
-      .catalog()
-      .pipe(catchError(() => of<PermissionAreaDto[]>([])))
-      .subscribe((areas) => {
-        const owned = this.auth.permissions();
-        this.areas.set(
-          areas
-            .map((area) => ({
-              area: area.area,
-              permissions: area.permissions.filter((permission) => owned.has(permission))
-            }))
-            .filter((area) => area.permissions.length > 0)
-        );
-      });
-  }
+  /**
+   * The signed-in user's own permissions (from /api/auth/me, already loaded), grouped by area.
+   * No catalog request: that endpoint needs Permissions.View, which most roles do not hold, so
+   * the page used to show "Forbidden" and "No permissions assigned" for them (QA-05).
+   */
+  protected readonly areas = computed<PermissionAreaDto[]>(() => {
+    const byArea = new Map<string, string[]>();
+
+    for (const permission of [...this.auth.permissions()].sort()) {
+      const area = permission.includes('.') ? permission.slice(0, permission.indexOf('.')) : permission;
+      byArea.set(area, [...(byArea.get(area) ?? []), permission]);
+    }
+
+    return [...byArea.entries()].map(([area, permissions]) => ({ area, permissions }));
+  });
 }

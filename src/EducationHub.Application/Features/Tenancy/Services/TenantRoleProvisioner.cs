@@ -45,38 +45,92 @@ public sealed class TenantRoleProvisioner(
 
     /// <summary>
     /// The first stamped version of the built-in permission sets. Roles stamped with it hold
-    /// (or held, before a tenant customised them) the defaults as they were then; everything
-    /// granted later is listed in <see cref="AddedInVersion"/>.
+    /// (or held, before a tenant customised them) the defaults as they were then; every later
+    /// change is listed in <see cref="DefaultsHistory"/>.
     /// </summary>
     public const string BaselineVersion = "2026-11-18";
 
     /// <summary>
     /// Version of <see cref="BuildDefaultRolePermissions"/>: always the last entry of
-    /// <see cref="AddedInVersion"/>. To grant a built-in role a new permission, add it to the
-    /// role in <see cref="BuildDefaultRolePermissions"/> (for new tenants), append a new
-    /// version entry listing it (for existing tenants) and set this constant to that version.
+    /// <see cref="DefaultsHistory"/>. To change a built-in role, change it in
+    /// <see cref="BuildDefaultRolePermissions"/> (for new tenants), append a new
+    /// <see cref="DefaultsChange"/> listing what was added/removed (for existing tenants) and set
+    /// this constant to that version.
     /// </summary>
-    public const string DefaultsVersion = "2026-11-18.2";
+    public const string DefaultsVersion = "2026-11-19.1";
+
+    /// <summary>One version of the built-in defaults: per role, what it added and what it removed.</summary>
+    public sealed record DefaultsChange(
+        string Version,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> Added,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? Removed = null);
 
     /// <summary>
-    /// What each version added to which built-in role, oldest first. Existing roles are upgraded
-    /// additively: only the entries newer than a role's stamp are applied, and only by adding.
-    /// Nothing is ever removed, and a permission granted by an older version that a tenant has
-    /// since removed is never granted again.
+    /// The changes to the built-in defaults, oldest first. Existing roles are upgraded with only the
+    /// entries newer than their stamp. Additions never re-grant a permission a tenant removed after
+    /// an older version. A removal is applied only to a role that is still exactly on the default
+    /// (its permissions equal the old default set), so a customised role never loses anything.
     /// </summary>
-    internal static readonly IReadOnlyList<(string Version, IReadOnlyDictionary<string, IReadOnlyList<string>> Added)> AddedInVersion =
+    internal static readonly IReadOnlyList<DefaultsChange> DefaultsHistory =
     [
-        ("2026-11-18.2", new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        new("2026-11-18.2", new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
             [RoleNames.TenantOwner] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage],
             [RoleNames.TenantAdmin] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage],
             [RoleNames.Assistant] = [PermissionConstants.RegistrationRequestsView, PermissionConstants.RegistrationRequestsManage]
-        })
+        }),
+
+        // The Assistant approves registrations, which creates parents, so it can now see them.
+        // The owner's family-only permission opened an empty /my-children page.
+        new(
+            "2026-11-19.1",
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [RoleNames.Assistant] = [PermissionConstants.ParentsView]
+            },
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [RoleNames.TenantOwner] = [PermissionConstants.ParentsViewOwnChildren]
+            })
     ];
 
     /// <summary>The full default permission set of a built-in role (empty for an unknown name).</summary>
     public static IReadOnlyList<string> DefaultPermissionsFor(string roleName)
         => DefaultRolePermissions.TryGetValue(roleName, out var permissions) ? permissions : [];
+
+    /// <summary>
+    /// Index of the first <see cref="DefaultsHistory"/> entry newer than
+    /// <paramref name="stampedVersion"/>, or -1 when the stamp is not a version this build knows.
+    /// </summary>
+    private static int FirstChangeAfter(string stampedVersion)
+    {
+        if (string.Equals(stampedVersion, BaselineVersion, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        for (var i = 0; i < DefaultsHistory.Count; i++)
+        {
+            if (string.Equals(DefaultsHistory[i].Version, stampedVersion, StringComparison.Ordinal))
+            {
+                return i + 1;
+            }
+        }
+
+        return -1;
+    }
+
+    private static IReadOnlyList<string> Collect(
+        int start,
+        string roleName,
+        Func<DefaultsChange, IReadOnlyDictionary<string, IReadOnlyList<string>>?> pick)
+        =>
+        [
+            .. DefaultsHistory
+                .Skip(start)
+                .SelectMany(change => pick(change) is { } perRole && perRole.TryGetValue(roleName, out var list) ? list : [])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
 
     /// <summary>
     /// The permissions to add to a role stamped <paramref name="stampedVersion"/>, or null when
@@ -85,33 +139,21 @@ public sealed class TenantRoleProvisioner(
     /// </summary>
     public static IReadOnlyList<string>? PermissionsAddedSince(string roleName, string stampedVersion)
     {
-        var start = -1;
+        var start = FirstChangeAfter(stampedVersion);
 
-        if (string.Equals(stampedVersion, BaselineVersion, StringComparison.Ordinal))
-        {
-            start = 0;
-        }
+        return start < 0 ? null : Collect(start, roleName, static change => change.Added);
+    }
 
-        for (var i = 0; start < 0 && i < AddedInVersion.Count; i++)
-        {
-            if (string.Equals(AddedInVersion[i].Version, stampedVersion, StringComparison.Ordinal))
-            {
-                start = i + 1;
-            }
-        }
+    /// <summary>
+    /// The permissions the versions after <paramref name="stampedVersion"/> removed from the role's
+    /// defaults (null for an unknown stamp). A null stamp (role created before versioning) means
+    /// every removal in the history.
+    /// </summary>
+    public static IReadOnlyList<string>? PermissionsRemovedSince(string roleName, string? stampedVersion)
+    {
+        var start = stampedVersion is null ? 0 : FirstChangeAfter(stampedVersion);
 
-        if (start < 0)
-        {
-            return null;
-        }
-
-        return
-        [
-            .. AddedInVersion
-                .Skip(start)
-                .SelectMany(entry => entry.Added.TryGetValue(roleName, out var added) ? added : [])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-        ];
+        return start < 0 ? null : Collect(start, roleName, static change => change.Removed);
     }
 
     /// <summary>
@@ -139,7 +181,13 @@ public sealed class TenantRoleProvisioner(
         {
             // Everything inside the tenant; never the platform-only areas (tenants, plans,
             // platform settings), which belong to the platform administrator alone.
-            [RoleNames.TenantOwner] = [.. PermissionConstants.GetTenantPermissions()],
+            // Never the family-only "my own children" view either: an owner has no children in
+            // the centre, and it only opened an empty /my-children page (removed in 2026-11-19.1).
+            [RoleNames.TenantOwner] =
+            [
+                .. PermissionConstants.GetTenantPermissions()
+                    .Where(static p => !string.Equals(p, PermissionConstants.ParentsViewOwnChildren, StringComparison.OrdinalIgnoreCase))
+            ],
 
             [RoleNames.TenantAdmin] =
             [
@@ -207,6 +255,7 @@ public sealed class TenantRoleProvisioner(
                 .. Group("Homework", "View"),
                 .. Group("Exams", "View"),
                 .. Group("RegistrationRequests", "View", "Manage"),
+                .. Group("Parents", "View"),
                 PermissionConstants.DashboardView,
                 PermissionConstants.Login,
                 PermissionConstants.ChangePassword
@@ -348,9 +397,10 @@ public sealed class TenantRoleProvisioner(
     /// <remarks>
     /// <para>
     /// A tenant may adjust its own system roles (remove a permission, add an extra one). The
-    /// upgrade therefore never removes anything and only grants what the versions newer than the
-    /// role's stamp added (<see cref="AddedInVersion"/>), so a permission the tenant deliberately
-    /// removed is not granted back. A role already at the current version is not touched.
+    /// upgrade therefore only grants what the versions newer than the role's stamp added
+    /// (<see cref="DefaultsHistory"/>), so a permission the tenant deliberately removed is not
+    /// granted back, and it removes what those versions removed only from a role that is still
+    /// exactly on the default. A role already at the current version is not touched.
     /// </para>
     /// <para>
     /// A role with no stamp at all predates versioning, when every startup reset roles to the
@@ -413,6 +463,13 @@ public sealed class TenantRoleProvisioner(
             return granted;
         }
 
+        var removed = await RemoveIfStillDefaultAsync(role, roleName, stamp, cancellationToken).ConfigureAwait(false);
+
+        if (!removed.Succeeded)
+        {
+            return removed;
+        }
+
         if (toAdd.Count > 0)
         {
             logger.LogInformation(
@@ -428,6 +485,61 @@ public sealed class TenantRoleProvisioner(
         return stamped.Succeeded
             ? new RoleProvisionResult(true, [])
             : new RoleProvisionResult(false, [.. stamped.Errors.Select(static e => e.Description)]);
+    }
+
+    /// <summary>
+    /// Applies the removals of the versions after <paramref name="stamp"/>, but only when the role
+    /// is still exactly on the default: its permissions equal the current defaults plus the
+    /// permissions being removed. Any customisation (an extra or a missing permission) means the
+    /// tenant owns this role's set, and nothing is taken away from it.
+    /// </summary>
+    private async Task<RoleProvisionResult> RemoveIfStillDefaultAsync(
+        ApplicationRole role,
+        string roleName,
+        string? stamp,
+        CancellationToken cancellationToken)
+    {
+        var toRemove = PermissionsRemovedSince(roleName, stamp) ?? [];
+
+        if (toRemove.Count == 0)
+        {
+            return new RoleProvisionResult(true, []);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Re-read: the additions above changed the claims.
+        var permissionClaims = (await roleManager.GetClaimsAsync(role).ConfigureAwait(false))
+            .Where(static c => c.Type == EducationHubClaimTypes.PermissionClaimType)
+            .ToArray();
+
+        var current = permissionClaims.Select(static c => c.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var oldDefault = DefaultPermissionsFor(roleName).Concat(toRemove).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!current.SetEquals(oldDefault))
+        {
+            logger.LogInformation(
+                "Role {RoleName} ({RoleId}) is customised; kept {Permissions} that the new defaults no longer include",
+                roleName,
+                role.Id,
+                string.Join(", ", toRemove.Where(current.Contains)));
+
+            return new RoleProvisionResult(true, []);
+        }
+
+        var errors = new List<string>();
+
+        foreach (var claim in permissionClaims.Where(c => toRemove.Contains(c.Value, StringComparer.OrdinalIgnoreCase)))
+        {
+            var removal = await roleManager.RemoveClaimAsync(role, claim).ConfigureAwait(false);
+
+            if (!removal.Succeeded)
+            {
+                errors.AddRange(removal.Errors.Select(static e => e.Description));
+            }
+        }
+
+        return new RoleProvisionResult(errors.Count == 0, errors);
     }
 
     /// <summary>Grants each of <paramref name="permissions"/> the role does not hold yet; never removes.</summary>

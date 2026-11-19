@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell.component';
 import { authGuard, guestGuard, requireAuthGuard } from './core/guards/auth.guard';
-import { anyRoleGuard, permissionGuard } from './core/guards/permission.guard';
+import { anyRoleGuard, permissionGuard, staffRouteGuard } from './core/guards/permission.guard';
 import { FAMILY_ROLES } from './core/nav';
 
 export const routes: Routes = [
@@ -142,24 +142,24 @@ export const routes: Routes = [
       },
       {
         path: 'groups',
-        canActivate: [permissionGuard('Groups.View')],
+        canActivate: [permissionGuard('Groups.View'), staffRouteGuard],
         loadComponent: () => import('./features/groups/groups.component').then((m) => m.GroupsComponent)
       },
       {
         path: 'sessions',
-        canActivate: [permissionGuard('Sessions.View')],
+        canActivate: [permissionGuard('Sessions.View'), staffRouteGuard],
         loadComponent: () =>
           import('./features/sessions/sessions.component').then((m) => m.SessionsComponent)
       },
       {
         path: 'homework',
-        canActivate: [permissionGuard('Homework.View')],
+        canActivate: [permissionGuard('Homework.View'), staffRouteGuard],
         loadComponent: () =>
           import('./features/learning/homework.component').then((m) => m.HomeworkComponent)
       },
       {
         path: 'exams',
-        canActivate: [permissionGuard('Exams.View')],
+        canActivate: [permissionGuard('Exams.View'), staffRouteGuard],
         loadComponent: () => import('./features/learning/exams.component').then((m) => m.ExamsComponent)
       },
       {

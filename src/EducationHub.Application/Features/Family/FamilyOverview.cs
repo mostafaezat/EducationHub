@@ -62,7 +62,8 @@ public sealed record FamilyStudentOverviewDto(
     IReadOnlyList<FamilySessionDto> UpcomingSessions,
     IReadOnlyList<FamilyHomeworkDto> Homework,
     IReadOnlyList<FamilyExamDto> Exams,
-    StudentBalanceDto? Balance);
+    StudentBalanceDto? Balance,
+    string Currency = "EGP");
 
 // ---- Query -------------------------------------------------------------------
 
@@ -88,7 +89,8 @@ public sealed class GetMyFamilyOverviewQueryHandler(
     IRepository<ExamResult> results,
     SchedulingReadModel scheduling,
     IDateTimeService clock,
-    IMediator mediator)
+    IMediator mediator,
+    IRepository<EducationHub.Domain.Entities.Tenancy.Tenant> tenants)
     : IRequestHandler<GetMyFamilyOverviewQuery, Result<IReadOnlyList<FamilyStudentOverviewDto>>>
 {
     private const int RecentSessionCount = 15;
@@ -123,9 +125,19 @@ public sealed class GetMyFamilyOverviewQueryHandler(
         var today = clock.GetTenantToday();
         var list = new List<FamilyStudentOverviewDto>(profiles.Count);
 
+        // The centre's currency (ISO code, e.g. EGP), so the family pages can label amounts.
+        var currency = profiles.Count == 0
+            ? null
+            : await tenants.Query
+                .Where(t => t.Id == profiles[0].TenantId)
+                .Select(static t => t.Currency)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
         foreach (var profile in profiles)
         {
-            list.Add(await BuildAsync(profile, today, cancellationToken).ConfigureAwait(false));
+            var overview = await BuildAsync(profile, today, cancellationToken).ConfigureAwait(false);
+            list.Add(overview with { Currency = string.IsNullOrWhiteSpace(currency) ? "EGP" : currency });
         }
 
         return Result<IReadOnlyList<FamilyStudentOverviewDto>>.Success(list);

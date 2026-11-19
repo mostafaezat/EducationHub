@@ -17,7 +17,7 @@ import { FinanceService } from '../../core/services/finance.service';
 import { RolesService } from '../../core/services/roles.service';
 import { TenantsService } from '../../core/services/tenants.service';
 import { UsersService } from '../../core/services/users.service';
-import { money, shortTime } from '../shared/ops-utils';
+import { displayDate, displayMoney, money, shortTime } from '../shared/ops-utils';
 
 interface StatCard {
   label: string;
@@ -57,7 +57,7 @@ interface StatDefinition {
             <div class="family-row">
               <span>{{ t('family.nextSession') }}</span>
               @if (child.upcomingSessions[0]; as next) {
-                <strong>{{ next.session.date }} · {{ time(next.session.startTime) }}</strong>
+                <strong>{{ familyDate(next.session.date) }} · {{ time(next.session.startTime) }}</strong>
               } @else {
                 <strong>—</strong>
               }
@@ -68,7 +68,7 @@ interface StatDefinition {
             </div>
             <div class="family-row">
               <span>{{ t('family.outstandingFees') }}</span>
-              <strong [class.warn-text]="(child.balance?.outstanding ?? 0) > 0">{{ money(child.balance?.outstanding) }}</strong>
+              <strong [class.warn-text]="(child.balance?.outstanding ?? 0) > 0">{{ familyMoney(child, child.balance?.outstanding) }}</strong>
             </div>
             <span class="family-link">{{ t('family.openDetails') }} <i class="pi pi-arrow-right"></i></span>
           </a>
@@ -352,6 +352,15 @@ export class DashboardComponent {
   protected readonly kpis = signal<DashboardKpisDto | null>(null);
   protected readonly money = money;
   protected readonly time = shortTime;
+
+  /** Family cards: dates and amounts in the UI language, with the centre currency (QA-10). */
+  protected familyDate(value: string | null | undefined): string {
+    return displayDate(value, this.auth.language());
+  }
+
+  protected familyMoney(child: FamilyStudentOverviewDto, value: number | null | undefined): string {
+    return displayMoney(value, child.currency, this.auth.language());
+  }
   protected readonly family = signal<FamilyStudentOverviewDto[]>([]);
 
   /** Students and parents get their own children's summary instead of centre-wide figures. */

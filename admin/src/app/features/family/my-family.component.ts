@@ -19,7 +19,7 @@ import {
 import { AuthService } from '../../core/services/auth.service';
 import { FamilyService } from '../../core/services/family.service';
 import { NotificationService } from '../../core/services/notification.service';
-import { money, shortTime } from '../shared/ops-utils';
+import { displayDate, displayMoney, shortTime } from '../shared/ops-utils';
 import { saveBlob } from '../shared/save-blob';
 
 type FamilyTab = 'overview' | 'sessions' | 'homework' | 'exams';
@@ -73,7 +73,7 @@ type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
         <div class="summary">
           <span>{{ t('family.nextSession') }}</span>
           @if (c.upcomingSessions[0]; as next) {
-            <strong>{{ next.session.date }}</strong>
+            <strong>{{ date(next.session.date) }}</strong>
             <small>{{ next.session.groupName }} · {{ time(next.session.startTime) }}</small>
           } @else {
             <strong>—</strong>
@@ -86,9 +86,9 @@ type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
         </div>
         <div class="summary" [class.warn]="(c.balance?.outstanding ?? 0) > 0">
           <span>{{ t('family.outstandingFees') }}</span>
-          <strong>{{ money(c.balance?.outstanding) }}</strong>
+          <strong>{{ fee(c, c.balance?.outstanding) }}</strong>
           @if (c.balance && c.balance.credit > 0) {
-            <small>{{ t('family.credit') }}: {{ money(c.balance.credit) }}</small>
+            <small>{{ t('family.credit') }}: {{ fee(c, c.balance.credit) }}</small>
           }
         </div>
       </div>
@@ -173,7 +173,7 @@ type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
                     }
                   </td>
                   <td>{{ h.groupName || '—' }}</td>
-                  <td>{{ h.dueDate }}</td>
+                  <td>{{ date(h.dueDate) }}</td>
                   <td><p-tag [value]="t('submissionStatus.' + h.status)" [severity]="submissionSeverity(h)" /></td>
                   <td>{{ gradeText(h) }}</td>
                   <td>{{ h.feedback || '—' }}</td>
@@ -227,7 +227,7 @@ type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
                 <tr>
                   <td><strong>{{ e.title }}</strong></td>
                   <td>{{ e.groupName || '—' }}</td>
-                  <td>{{ e.examDate }}</td>
+                  <td>{{ date(e.examDate) }}</td>
                   <td>
                     @if (e.isAbsent) {
                       <p-tag [value]="t('family.absent')" severity="danger" />
@@ -287,7 +287,7 @@ type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
         </ng-template>
         <ng-template pTemplate="body" let-row>
           <tr>
-            <td>{{ row.session.date }}</td>
+            <td>{{ date(row.session.date) }}</td>
             <td>{{ time(row.session.startTime) }}–{{ time(row.session.endTime) }}</td>
             <td>{{ row.session.groupName || '—' }}</td>
             <td>{{ row.session.topic || '—' }}</td>
@@ -411,8 +411,17 @@ export class MyFamilyComponent implements OnInit {
   private readonly notifications = inject(NotificationService);
 
   protected readonly t = inject(TranslateService).t;
-  protected readonly money = money;
   protected readonly time = shortTime;
+
+  /** A date in the current UI language (QA-10). */
+  protected date(value: string | null | undefined): string {
+    return displayDate(value, this.auth.language());
+  }
+
+  /** An amount with the centre's currency in the current UI language (QA-10). */
+  protected fee(child: FamilyStudentOverviewDto, value: number | null | undefined): string {
+    return displayMoney(value, child.currency, this.auth.language());
+  }
 
   protected readonly loading = signal(false);
   protected readonly children = signal<FamilyStudentOverviewDto[]>([]);

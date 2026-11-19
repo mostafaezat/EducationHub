@@ -1160,6 +1160,8 @@ export interface FamilyStudentOverviewDto {
   homework: FamilyHomeworkDto[];
   exams: FamilyExamDto[];
   balance?: StudentBalanceDto | null;
+  /** The centre's currency (ISO code, e.g. EGP). */
+  currency?: string | null;
 }
 
 // ---- Pre-registration requests (public form + staff review) ----------------

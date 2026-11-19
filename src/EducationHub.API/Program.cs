@@ -184,8 +184,23 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // Retry-After is the limiter's real wait (time left in the window), and the public
+    // registration form gets its own message instead of the credential one (QA-08).
     options.OnRejected = static (context, cancellationToken) =>
-        new ValueTask(RateLimitResponses.WriteAsync(context.HttpContext, RateLimitResponses.RetryAfterSeconds, cancellationToken));
+    {
+        var retryAfter = RateLimitResponses.RetryAfterSeconds(context.Lease, TimeSpan.FromMinutes(1));
+        var policy = context.HttpContext.GetEndpoint()?.Metadata
+            .GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName;
+
+        return new ValueTask(policy == RateLimitPolicies.PublicRegistration
+            ? RateLimitResponses.WriteAsync(
+                context.HttpContext,
+                retryAfter,
+                global::EducationHub.Shared.Common.Localization.LocalizationKeys.PublicRegistrationRateLimited,
+                "Too many registration requests were sent from this connection. Please try again in {0} minutes.",
+                cancellationToken)
+            : RateLimitResponses.WriteAsync(context.HttpContext, retryAfter, cancellationToken));
+    };
 
     // Phone password reset, per remote IP. The per-number budget is PhoneResetRateLimiter.
     options.AddPolicy(PhoneResetRateLimitPolicy, httpContext =>
@@ -217,11 +232,15 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { Window = limits.Window, PermitLimit = limits.PermitLimit, QueueLimit = 0 });
     });
 
+    // Credential endpoints, per remote IP: only the loose backstop (Auth:RateLimit:PerIp). The real
+    // budget is per IP + login name (CredentialRateLimiter, an action filter), so colleagues
+    // behind one router do not block each other.
     options.AddPolicy(AuthCredentialRateLimitPolicy, httpContext =>
     {
         var limits = httpContext.RequestServices
             .GetRequiredService<IOptions<AuthRateLimitOptions>>()
-            .Value;
+            .Value
+            .PerIp;
 
         return RateLimitPartition.GetFixedWindowLimiter(
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -237,6 +256,7 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.Configure<AuthRateLimitOptions>(
     builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));
 builder.Services.AddSingleton<PhoneResetRateLimiter>();
+builder.Services.AddSingleton<CredentialRateLimiter>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

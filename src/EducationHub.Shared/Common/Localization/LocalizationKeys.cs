@@ -205,4 +205,7 @@ public static class LocalizationKeys
     public const string BranchMismatch = "Errors.BranchMismatch";
     public const string RateLimited = "Errors.TooManyRequests";
     public const string RateLimitedTitle = "Errors.TooManyAttemptsTitle";
+
+    /// <summary>429 of the public pre-registration form; {0} is the wait in minutes.</summary>
+    public const string PublicRegistrationRateLimited = "PublicRegistration.TooManyRequests";
 }

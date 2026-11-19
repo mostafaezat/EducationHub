@@ -107,6 +107,9 @@ public sealed class SeedingTests(ApiTestFixture fixture)
         Assert.Contains(PermissionConstants.PaymentsView, first.Permissions);
         Assert.Contains(PermissionConstants.RegistrationRequestsView, first.Permissions);
         Assert.Contains(PermissionConstants.RegistrationRequestsManage, first.Permissions);
+
+        // 2026-11-19.1 adds Parents.View to the Assistant (decision 3), on top of the customisation.
+        Assert.Contains(PermissionConstants.ParentsView, first.Permissions);
         Assert.Equal(TenantRoleProvisioner.DefaultsVersion, first.Stamp);
 
         // Idempotent: a second run changes nothing (the deliberate removal stays removed).
@@ -134,6 +137,86 @@ public sealed class SeedingTests(ApiTestFixture fixture)
         }
 
         Assert.Null(TenantRoleProvisioner.PermissionsAddedSince(RoleNames.Assistant, "2999-01-01"));
+
+        // A removed permission is, by definition, no longer part of the role's defaults.
+        foreach (var roleName in RoleNames.TenantRoles)
+        {
+            var defaults = TenantRoleProvisioner.DefaultPermissionsFor(roleName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.All(TenantRoleProvisioner.PermissionsRemovedSince(roleName, TenantRoleProvisioner.BaselineVersion)!, p => Assert.DoesNotContain(p, defaults));
+        }
+
+        Assert.DoesNotContain(PermissionConstants.ParentsViewOwnChildren, TenantRoleProvisioner.DefaultPermissionsFor(RoleNames.TenantOwner));
+        Assert.Contains(PermissionConstants.ParentsView, TenantRoleProvisioner.DefaultPermissionsFor(RoleNames.Assistant));
+    }
+
+    [Fact]
+    public async Task A_removal_applies_only_to_an_owner_role_still_on_the_old_default()
+    {
+        // Decision 7: the owner loses Parents.ViewOwnChildren only when its set is untouched.
+        var (_, onDefaultToken) = await ModuleTestHelpers.ProvisionAndLoginAsync(Client, "seed-remove-default");
+        var (_, customisedToken) = await ModuleTestHelpers.ProvisionAndLoginAsync(Client, "seed-remove-custom");
+        var onDefault = await OwnerRoleIdAsync(onDefaultToken);
+        var customised = await OwnerRoleIdAsync(customisedToken);
+
+        // The owner set as the previous version (2026-11-18.2) defined it: every tenant permission.
+        var oldDefault = TenantRoleProvisioner.DefaultPermissionsFor(RoleNames.TenantOwner)
+            .Append(PermissionConstants.ParentsViewOwnChildren)
+            .ToList();
+
+        await SetPermissionsAsync(onDefault, oldDefault);
+        await SetDefaultsStampAsync(onDefault, "2026-11-18.2");
+
+        // The other centre removed one permission from its owner role: it is customised.
+        await SetPermissionsAsync(customised, oldDefault.Where(p => p != PermissionConstants.AuditLogsView));
+        await SetDefaultsStampAsync(customised, "2026-11-18.2");
+
+        await ReseedRolesAsync();
+
+        var after = await ReadRoleAsync(onDefault);
+        Assert.DoesNotContain(PermissionConstants.ParentsViewOwnChildren, after.Permissions);
+        Assert.Equal(
+            TenantRoleProvisioner.DefaultPermissionsFor(RoleNames.TenantOwner).Order(StringComparer.Ordinal),
+            after.Permissions.Order(StringComparer.Ordinal));
+        Assert.Equal(TenantRoleProvisioner.DefaultsVersion, after.Stamp);
+
+        var kept = await ReadRoleAsync(customised);
+        Assert.Contains(PermissionConstants.ParentsViewOwnChildren, kept.Permissions);
+        Assert.DoesNotContain(PermissionConstants.AuditLogsView, kept.Permissions);
+        Assert.Equal(TenantRoleProvisioner.DefaultsVersion, kept.Stamp);
+
+        // Idempotent.
+        await ReseedRolesAsync();
+        Assert.Equal(after.Permissions.Order(StringComparer.Ordinal), (await ReadRoleAsync(onDefault)).Permissions.Order(StringComparer.Ordinal));
+    }
+
+    private async Task<Guid> OwnerRoleIdAsync(string token)
+    {
+        var roles = await ModuleTestHelpers.GetDataAsync(Client, "/api/roles?pageSize=50", token);
+        return roles.GetProperty("items").EnumerateArray().First(r => r.GetProperty("name").GetString() == RoleNames.TenantOwner).Id();
+    }
+
+    private async Task SetPermissionsAsync(Guid roleId, IEnumerable<string> permissions)
+    {
+        using var scope = fixture.CreateScope();
+        using var _ = PlatformScopeOverride.Begin();
+        var provisioner = scope.ServiceProvider.GetRequiredService<TenantRoleProvisioner>();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        var role = await roleManager.Roles.IgnoreQueryFilters().FirstAsync(r => r.Id == roleId);
+
+        Assert.True((await provisioner.ReconcilePermissionsAsync(role, [.. permissions])).Succeeded);
+    }
+
+    private async Task<(List<string> Permissions, string? Stamp)> ReadRoleAsync(Guid roleId)
+    {
+        using var scope = fixture.CreateScope();
+        using var _ = PlatformScopeOverride.Begin();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        var role = await roleManager.Roles.IgnoreQueryFilters().FirstAsync(r => r.Id == roleId);
+        var claims = await roleManager.GetClaimsAsync(role);
+
+        return (
+            [.. claims.Where(static c => c.Type == EducationHubClaimTypes.PermissionClaimType).Select(static c => c.Value)],
+            Assert.Single(claims, static c => c.Type == TenantRoleProvisioner.DefaultsVersionClaimType).Value);
     }
 
     private async Task ReseedRolesAsync()

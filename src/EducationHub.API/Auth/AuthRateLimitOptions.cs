@@ -9,11 +9,21 @@ public sealed class AuthRateLimitOptions
 {
     public const string SectionName = "Auth:RateLimit";
 
-    /// <summary>Maximum number of credential attempts per window, per remote IP.</summary>
+    /// <summary>
+    /// Maximum number of credential attempts per window, per remote IP <b>and login name</b>
+    /// (login, forgot password, resend confirmation): colleagues behind one router each get their
+    /// own budget.
+    /// </summary>
     public int PermitLimit { get; set; } = 5;
 
     /// <summary>The duration of the fixed window (parsed from ISO-8601, e.g. "00:05:00").</summary>
     public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The loose per-IP backstop of the same endpoints (<c>Auth:RateLimit:PerIp</c>), against
+    /// trying many login names from one address.
+    /// </summary>
+    public WindowRateLimitOptions PerIp { get; set; } = new() { PermitLimit = 30, Window = TimeSpan.FromMinutes(5) };
 
     /// <summary>Password reset by mobile number (<c>Auth:RateLimit:PhoneReset</c>).</summary>
     public PhoneResetRateLimitOptions PhoneReset { get; set; } = new();

@@ -77,6 +77,9 @@ public sealed class LearningEndpointTests(ApiTestFixture fixture)
         var family = await ModuleTestHelpers.GetDataAsync(Client, "/api/my/family", parentToken);
         var child = Assert.Single(family.EnumerateArray());
         Assert.Equal(student.Id(), child.GetProperty("studentProfileId").GetGuid());
+
+        // QA-10: the family view carries the centre's currency so amounts can be labelled.
+        Assert.Equal("EGP", child.GetProperty("currency").GetString());
         var childHomework = Assert.Single(child.GetProperty("homework").EnumerateArray());
         Assert.Equal("Graded", childHomework.GetProperty("status").GetString());
         Assert.Equal(9m, childHomework.Dec("grade"));

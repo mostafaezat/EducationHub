@@ -143,6 +143,7 @@
   "Errors.BranchMismatch": "The supplied X-Branch-Id does not match the authenticated branch.",
   "Errors.TooManyRequests": "Too many credential attempts from this address. Try again shortly.",
   "Errors.TooManyAttemptsTitle": "Too many attempts",
+  "PublicRegistration.TooManyRequests": "Too many registration requests were sent from this connection. Please try again in {0} minutes.",
   "Validation.ProfileLinkConflicts": "Account e-mail and password cannot be supplied when linking an existing user account.",
   "Validation.AccountEmailRequired": "An e-mail address is required to create a sign-in account.",
   "Validation.GuardianListRequired": "The guardian list is required.",

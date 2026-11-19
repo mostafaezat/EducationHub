@@ -28,8 +28,11 @@ Rules that follow from it:
 - `Student`, `Parent`: added `Groups.View`, `Sessions.View`, `Attendance.View`, `Homework.View`,
   `Exams.View` - read-only and narrowed to their own family by the scope above.
 
-`RoleSeeder` reconciles the built-in roles on every startup, so these apply to existing tenants after
-the API restarts. Users must sign out and back in to receive a token with the new permissions.
+New tenants get these sets directly. Existing tenants received them once, when `RoleSeeder` applied
+that `DefaultsVersion` at start-up; since then a version bump never resets a role - it only adds
+(or, for untouched defaults, removes) what its version entry lists, see
+[Built-in role defaults are additive](#built-in-role-defaults-are-additive). Users must sign out and
+back in to receive a token with changed permissions.
 
 ## Family endpoint
 
@@ -157,8 +160,8 @@ all live in `PublicRegistrationReader`. The admin app's HTTP interceptor never s
 
 **Permissions**: `RegistrationRequests.View`, `RegistrationRequests.Manage` (new area
 `RegistrationRequests`). Default holders: `TenantOwner` (all tenant permissions), `TenantAdmin`,
-`Assistant`. `TenantRoleProvisioner.DefaultsVersion` is now `2026-11-18.2`; its
-`AddedInVersion` entry grants the two permissions to those roles in existing tenants on the next
+`Assistant`. `TenantRoleProvisioner.DefaultsVersion` `2026-11-18.2`'s
+`DefaultsHistory` entry granted the two permissions to those roles in existing tenants on the next
 start-up, without touching anything else (see the next section).
 
 ## Built-in role defaults are additive
@@ -171,31 +174,44 @@ tokens). On every start-up `RoleSeeder` calls
 |---|---|
 | Missing (new tenant, or a role that was never created) | Created with the **full** defaults from `BuildDefaultRolePermissions`, stamped `DefaultsVersion`. Tenant creation (`CreateTenantCommandHandler`) does the same. |
 | Stamped `DefaultsVersion` | Nothing. |
-| Stamped an older known version | Only the permissions listed in the `AddedInVersion` entries **newer than the stamp** are granted (those the role already holds are skipped), then the stamp is set to `DefaultsVersion`. |
-| No stamp (created before versioning, when every start-up reset roles) | The defaults it is missing are added; nothing is removed; stamped. |
+| Stamped an older known version | The permissions **added** by the `DefaultsHistory` entries newer than the stamp are granted (those the role already holds are skipped). The permissions those entries **removed** are taken away only when the role is still exactly on the default (see below). Then the stamp is set to `DefaultsVersion`. |
+| No stamp (created before versioning, when every start-up reset roles) | The defaults it is missing are added; removals apply as for an old stamp; stamped. |
 | Stamp this build does not know (written by a newer build) | Left alone, with a warning in the log. |
 
-The upgrade **never removes** a permission, so a tenant's extra grants survive, and it never
-re-grants a permission introduced by an older version: if a centre removed `Attendance.Mark` from
-its Assistant, a later bump does not give it back.
+The upgrade never takes anything from a **customised** role, so a tenant's extra grants survive,
+and it never re-grants a permission introduced by an older version: if a centre removed
+`Attendance.Mark` from its Assistant, a later bump does not give it back.
 
-**Adding the next version's permissions** (e.g. a new `Foo.View` for `TenantAdmin`):
+A removal is applied only when the role's permissions, after the additions, are exactly the current
+defaults plus the permissions being removed - i.e. nobody has changed that role. Any difference
+(an extra or a missing permission) means the centre owns the set, and the permission is kept (logged
+at Information).
+
+**Versions so far** (`TenantRoleProvisioner.DefaultsHistory`):
+
+| Version | Added | Removed (only from roles still on the default) |
+|---|---|---|
+| `2026-11-18` | baseline | — |
+| `2026-11-18.2` | `RegistrationRequests.View`/`Manage` → TenantOwner, TenantAdmin, Assistant | — |
+| `2026-11-19.1` | `Parents.View` → Assistant (it approves registrations, which create parents) | `Parents.ViewOwnChildren` from TenantOwner (it only opened an empty `/my-children`) |
+
+**Changing a built-in role in the next version** (e.g. a new `Foo.View` for `TenantAdmin`):
 
 1. Add the constant to `PermissionConstants` (and its area/catalogue, as for any permission).
-2. Add it to the role(s) in `BuildDefaultRolePermissions` - new tenants get it from there.
-   `TenantOwner` gets every tenant permission automatically.
-3. Append an entry to `TenantRoleProvisioner.AddedInVersion`, e.g.
-   `("2026-12-01", { [RoleNames.TenantOwner] = [Foo.View], [RoleNames.TenantAdmin] = [Foo.View] })`.
-   List `TenantOwner` explicitly too. Never edit or reorder an existing entry.
+2. Change the role(s) in `BuildDefaultRolePermissions` - new tenants get the new set from there.
+   `TenantOwner` gets every tenant permission automatically (except `Parents.ViewOwnChildren`).
+3. Append a `DefaultsChange` to `TenantRoleProvisioner.DefaultsHistory`, e.g.
+   `new("2026-12-01", Added: { [RoleNames.TenantOwner] = [Foo.View], [RoleNames.TenantAdmin] = [Foo.View] })`,
+   with a `Removed:` map for permissions taken out of a default. List `TenantOwner` explicitly too.
+   Never edit or reorder an existing entry.
 4. Set `DefaultsVersion` to that new version string. Versions are matched by exact string and
    ordered by their position in the list, not by comparing the strings.
-5. Users pick the new permission up at their next sign-in or token refresh.
+5. Users pick the change up at their next sign-in or token refresh.
 
-Removing a permission from a built-in role in existing tenants is deliberately not automatic; do
-it with a one-off data fix or let each centre change its roles. The test
-`SeedingTests.Every_version_entry_only_adds_permissions_the_role_has_by_default` checks that
-every entry only grants what the role has by default and that `DefaultsVersion` is the newest
-entry.
+The tests `SeedingTests.Every_version_entry_only_adds_permissions_the_role_has_by_default` (every
+addition is in the defaults, every removal is not, `DefaultsVersion` is the newest entry),
+`A_defaults_version_bump_only_adds_new_permissions_and_keeps_customisations` and
+`A_removal_applies_only_to_an_owner_role_still_on_the_old_default` cover the rules.
 
 **Staff endpoints**:
 

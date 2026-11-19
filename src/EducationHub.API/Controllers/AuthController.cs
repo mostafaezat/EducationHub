@@ -27,7 +27,8 @@ public sealed class AuthController(IMediator mediator) : ControllerBase
     /// </remarks>
     [HttpPost("login")]
     [AllowAnonymous]
-    [EnableRateLimiting("auth-credential")]
+    [EnableRateLimiting(RateLimitPolicies.Credential)]
+    [CredentialRateLimit("login")]
     [ProducesResponseType(typeof(Result<AuthResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -85,7 +86,8 @@ public sealed class AuthController(IMediator mediator) : ControllerBase
     /// <summary>Emails a password reset link. Always succeeds, so addresses cannot be probed.</summary>
     [HttpPost("forgot-password")]
     [AllowAnonymous]
-    [EnableRateLimiting("auth-credential")]
+    [EnableRateLimiting(RateLimitPolicies.Credential)]
+    [CredentialRateLimit("forgot-password")]
     [ProducesResponseType(typeof(Result), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<Result>> ForgotPassword(
@@ -155,7 +157,8 @@ public sealed class AuthController(IMediator mediator) : ControllerBase
     /// <summary>Re-sends the confirmation link for an unconfirmed account. Always succeeds.</summary>
     [HttpPost("resend-confirmation")]
     [AllowAnonymous]
-    [EnableRateLimiting("auth-credential")]
+    [EnableRateLimiting(RateLimitPolicies.Credential)]
+    [CredentialRateLimit("resend-confirmation")]
     [ProducesResponseType(typeof(Result), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<Result>> ResendConfirmation(

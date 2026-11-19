@@ -143,6 +143,7 @@
   "Errors.BranchMismatch": "معرف الفرع المرسل لا يتطابق مع الفرع المُوثق.",
   "Errors.TooManyRequests": "تم تجاوز عدد المحاولات المسموح به لهذا العنوان. يرجى المحاولة لاحقاً.",
   "Errors.TooManyAttemptsTitle": "عدد محاولات كبير جداً",
+  "PublicRegistration.TooManyRequests": "تم إرسال طلبات تسجيل كثيرة من هذا الاتصال. يرجى المحاولة مرة أخرى بعد {0} دقيقة.",
   "Validation.ProfileLinkConflicts": "لا يمكن تقديم البريد الإلكتروني وكلمة المرور للحساب عند ربط حساب مستخدم موجود.",
   "Validation.AccountEmailRequired": "البريد الإلكتروني مطلوب لإنشاء حساب دخول.",
   "Validation.GuardianListRequired": "قائمة أولياء الأمور مطلوبة.",

@@ -46,6 +46,9 @@ export class AuthServiceStub {
     return this.permissionSet.has(permission);
   }
 
+  /** Same shape as AuthService.roles (a signal of the role set). */
+  readonly roles = () => this.roleSet;
+
   hasRole(role: string): boolean {
     return this.roleSet.has(role);
   }

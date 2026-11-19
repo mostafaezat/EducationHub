@@ -11,7 +11,7 @@ import { AuthService } from '../services/auth.service';
 import { NotificationService } from '../services/notification.service';
 import { AuthServiceStub, NotificationServiceStub } from '../testing/auth-stub';
 import { authGuard, guestGuard, requireAuthGuard } from './auth.guard';
-import { permissionGuard, roleGuard } from './permission.guard';
+import { permissionGuard, roleGuard, staffRouteGuard } from './permission.guard';
 
 describe('route guards', () => {
   let auth: AuthServiceStub;
@@ -116,6 +116,33 @@ describe('route guards', () => {
     it('denies a user outside the role', () => {
       expect(asUrl(run(roleGuard('PlatformAdmin')))).toBe('/dashboard');
       expect(notifications.errors.length).toBe(1);
+    });
+  });
+
+  describe('staffRouteGuard (decision 2)', () => {
+    it('sends a parent from a staff teaching page to My family', () => {
+      auth.roleSet.add('Parent');
+
+      expect(asUrl(run(staffRouteGuard, '/homework'))).toBe('/my-family');
+    });
+
+    it('sends a student to My family too', () => {
+      auth.roleSet.add('Student');
+
+      expect(asUrl(run(staffRouteGuard, '/groups'))).toBe('/my-family');
+    });
+
+    it('lets staff through', () => {
+      auth.roleSet.add('Teacher');
+
+      expect(run(staffRouteGuard, '/sessions')).toBeTrue();
+    });
+
+    it('lets a staff member who is also a parent through', () => {
+      auth.roleSet.add('Parent');
+      auth.roleSet.add('Teacher');
+
+      expect(run(staffRouteGuard, '/exams')).toBeTrue();
     });
   });
 });

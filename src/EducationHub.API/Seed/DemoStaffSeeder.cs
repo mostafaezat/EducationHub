@@ -40,8 +40,8 @@ public sealed class DemoStaffSeeder(
     /// <summary>Mobile numbers given to the demo parents' profiles (when they have none).</summary>
     public static readonly IReadOnlyList<(string Email, string Phone)> DemoParentPhones =
     [
-        ("parent.one@educationhub.local", "01000000001"),
-        ("parent.two@educationhub.local", "01000000002")
+        ("parent.one@educationhub.local", "01000000201"),
+        ("parent.two@educationhub.local", "01000000202")
     ];
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 
@@ -99,9 +100,50 @@ public sealed class AuthEndpointTests(ApiTestFixture fixture)
     }
 
     [Fact]
-    public async Task Rate_limiter_returns_429_with_retry_after()
+    public async Task Login_limit_is_per_ip_and_login_name_with_the_real_retry_after()
     {
+        // Decision 1: the budget is per IP + login name (3 here), so one person's failed attempts
+        // do not block a colleague signing in from the same address.
         var (factory, client) = fixture.CreateRateLimitedHost(permitLimit: 3);
+
+        try
+        {
+            var guessed = ApiScenarios.NewEmail("guessed");
+
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                // The same account in different spellings still counts as one name.
+                var spelling = attempt == 1 ? $"  {guessed.ToUpperInvariant()} " : guessed;
+                using var permitted = await client.PostJsonAsync("/api/auth/login", new { email = spelling, password = "Wh4tever#Pass" });
+                Assert.Equal(HttpStatusCode.Unauthorized, permitted.StatusCode);
+            }
+
+            using var rejected = await client.PostJsonAsync("/api/auth/login", new { email = guessed, password = "Wh4tever#Pass" });
+            Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+
+            // The wait comes from the limiter (time left in the 5-minute window), not a constant.
+            var retryAfter = int.Parse(rejected.Headers.GetValues("Retry-After").Single(), CultureInfo.InvariantCulture);
+            Assert.InRange(retryAfter, 61, 300);
+
+            // A colleague behind the same router is not affected.
+            using var colleague = await client.PostJsonAsync(
+                "/api/auth/login",
+                new { email = ApiTestFixture.AdminEmail, password = ApiTestFixture.AdminPassword });
+            Assert.Equal(HttpStatusCode.OK, colleague.StatusCode);
+        }
+        finally
+        {
+            client.Dispose();
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Per_ip_backstop_stops_spraying_many_login_names()
+    {
+        var (factory, client) = fixture.CreateRateLimitedHost(
+            ("Auth__RateLimit__PermitLimit", 100),
+            ("Auth__RateLimit__PerIp__PermitLimit", 3));
 
         try
         {
@@ -109,17 +151,50 @@ public sealed class AuthEndpointTests(ApiTestFixture fixture)
             {
                 using var permitted = await client.PostJsonAsync(
                     "/api/auth/login",
-                    new { email = ApiScenarios.NewEmail("nobody"), password = "Wh4tever#Pass" });
+                    new { email = ApiScenarios.NewEmail("spray"), password = "Wh4tever#Pass" });
 
                 Assert.Equal(HttpStatusCode.Unauthorized, permitted.StatusCode);
             }
 
             using var rejected = await client.PostJsonAsync(
                 "/api/auth/login",
-                new { email = ApiScenarios.NewEmail("nobody"), password = "Wh4tever#Pass" });
+                new { email = ApiScenarios.NewEmail("spray"), password = "Wh4tever#Pass" });
 
             Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
-            Assert.Equal("60", rejected.Headers.GetValues("Retry-After").Single());
+            Assert.True(rejected.Headers.Contains("Retry-After"));
+        }
+        finally
+        {
+            client.Dispose();
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Public_registration_429_has_its_own_message_and_the_real_wait()
+    {
+        // QA-08: it said "too many credential attempts" and Retry-After: 60 for a 1-hour window.
+        var (factory, client) = fixture.CreateRateLimitedHost(("Auth__RateLimit__PublicRegistration__PermitLimit", 2));
+
+        try
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                using var permitted = await client.PostJsonAsync("/api/public/registration/qa-no-such-centre", new { });
+                Assert.NotEqual(HttpStatusCode.TooManyRequests, permitted.StatusCode);
+            }
+
+            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en");
+            using var rejected = await client.PostJsonAsync("/api/public/registration/qa-no-such-centre", new { });
+            Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+
+            var retryAfter = int.Parse(rejected.Headers.GetValues("Retry-After").Single(), CultureInfo.InvariantCulture);
+            Assert.InRange(retryAfter, 3000, 3600);
+
+            var detail = (await rejected.ReadJsonAsync()).GetProperty("detail").GetString();
+            Assert.Contains("registration requests", detail, StringComparison.Ordinal);
+            Assert.DoesNotContain("credential", detail, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("60 minutes", detail, StringComparison.Ordinal);
         }
         finally
         {
